@@ -33,6 +33,8 @@ Ext.define("committed-vs-delivered", {
         name: "committed-vs-delivered"
     },
 
+    currentData: [],
+
     onTimeboxScopeChange: function(newTimeboxScope) {
         this.callParent(arguments);
         this.viewChange();
@@ -119,6 +121,7 @@ Ext.define("committed-vs-delivered", {
                                 var artifactStore = Ext.create('Rally.data.wsapi.Store', {
                                     model: 'HierarchicalRequirement',
                                     fetch: ['FormattedID', 'Name', 'ScheduleState', 'AcceptedDate'],
+                                    FormattedID: '',
                                     autoLoad: false,
                                     enablePostGet: true,
                                     filters: [
@@ -140,6 +143,9 @@ Ext.define("committed-vs-delivered", {
                                                 artifact.set('Delivered', true);
                                             }
                                             artifact.set('IterationAddedDate', validFrom);
+                                            artifact.set('IterationName', iteration.get('Name'));
+                                            artifact.set('IterationStartDate', iteration.get('StartDate'));
+                                            artifact.set('IterationEndDate', iteration.get('EndDate'))
                                         }, this);
                                         return {
                                             iteration: iteration,
@@ -164,6 +170,7 @@ Ext.define("committed-vs-delivered", {
                 var plannedDelivered = [];
                 var unplannedComitted = [];
                 var unplannedDelivered = [];
+                this.currentData = [];
                 _.each(sortedData, function(datum, index, collection) {
                     var pc = 0,
                         pd = 0,
@@ -181,6 +188,7 @@ Ext.define("committed-vs-delivered", {
 
                     if (datum.artifactStore) {
                         datum.artifactStore.each(function(artifact) {
+                            this.currentData.push(artifact.data);
                             if (artifact.get('Planned')) {
                                 pc++; // Committed and planned
                                 if (artifact.get('Delivered')) {
@@ -428,49 +436,69 @@ Ext.define("committed-vs-delivered", {
                 scope: this,
                 viewchange: this.viewChange,
             },
-            /*
-                        plugins: [{
-                                ptype: 'rallygridboardinlinefiltercontrol',
-                                inlineFilterButtonConfig: {
-                                    stateful: true,
-                                    stateId: this.getModelScopedStateId(currentModelName, 'filters'),
-                                    modelNames: this.modelNames,
-                                    inlineFilterPanelConfig: {
-                                        quickFilterPanelConfig: {
-                                            portfolioItemTypes: this.portfolioItemTypes,
-                                            modelName: currentModelName,
-                                            whiteListFields: [
-                                                'Tags',
-                                                'Milestones'
-                                            ]
+            plugins: [
+                /*{
+                                    ptype: 'rallygridboardinlinefiltercontrol',
+                                    inlineFilterButtonConfig: {
+                                        stateful: true,
+                                        stateId: this.getModelScopedStateId(currentModelName, 'filters'),
+                                        modelNames: this.modelNames,
+                                        inlineFilterPanelConfig: {
+                                            quickFilterPanelConfig: {
+                                                portfolioItemTypes: this.portfolioItemTypes,
+                                                modelName: currentModelName,
+                                                whiteListFields: [
+                                                    'Tags',
+                                                    'Milestones'
+                                                ]
+                                            }
                                         }
                                     }
-                                }
-                            },
-                            {
-                                ptype: 'rallygridboardfieldpicker',
-                                headerPosition: 'left',
-                                modelNames: this.modelNames,
-                                stateful: true,
-                                stateId: this.getModelScopedStateId(currentModelName, 'fields')
-                            },
-                                            {
-                                                ptype: 'rallygridboardactionsmenu',
-                                                menuItems: this._getExportMenuItems(),
-                                                buttonConfig: {
-                                                    iconCls: 'icon-export'
-                                                }
-                                            },
-                            {
-                                ptype: 'rallygridboardsharedviewcontrol',
-                                sharedViewConfig: {
-                                    enableUrlSharing: this.getSetting('enableUrlSharing'),
+                                },*/
+                /*
+                                {
+                                    ptype: 'rallygridboardfieldpicker',
+                                    headerPosition: 'left',
+                                    modelNames: this.modelNames,
                                     stateful: true,
-                                    stateId: this.getModelScopedStateId(currentModelName, 'views'),
-                                    stateEvents: ['select', 'beforedestroy']
-                                },
-                            }
-                        ]*/
+                                    stateId: this.getModelScopedStateId(currentModelName, 'fields')
+                                },*/
+                {
+                    ptype: 'rallygridboardactionsmenu',
+                    menuItems: [{
+                        text: 'Export to CSV...',
+                        handler: function() {
+                            var csvText = CArABU.technicalservices.FileUtilities.convertDataArrayToCSVText(this.currentData, {
+                                FormattedID: 'ID',
+                                Name: 'Name',
+                                ScheduleState: 'Schedule State',
+                                IterationName: 'Iteration Name',
+                                IterationStartDate: 'Iteration Start',
+                                IterationEndDate: 'Iteration End',
+                                IterationAddedDate: 'Date added to iteration',
+                                AcceptedDate: 'Accepted Date',
+                                Planned: 'Planned',
+                                Delivered: 'Delivered',
+                            });
+                            CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'comitted.csv');
+                        },
+                        scope: this
+                    }],
+                    buttonConfig: {
+                        iconCls: 'icon-export'
+                    }
+                },
+                /*
+                                {
+                                    ptype: 'rallygridboardsharedviewcontrol',
+                                    sharedViewConfig: {
+                                        enableUrlSharing: this.getSetting('enableUrlSharing'),
+                                        stateful: true,
+                                        stateId: this.getModelScopedStateId(currentModelName, 'views'),
+                                        stateEvents: ['select', 'beforedestroy']
+                                    },
+                                }*/
+            ]
         });
     },
 
