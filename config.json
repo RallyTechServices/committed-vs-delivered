@@ -1,0 +1,12 @@
+{
+    "className": "committed-vs-delivered",
+    "server": "https://rally1.rallydev.com",
+    "sdk": "2.1",
+    "javascript": [
+        "node_modules/@agile-central-technical-services/utils-shared-views/index.js",
+        "node_modules/@agile-central-technical-services/utils-ancestor-pi-app-filter/index.js",
+        "node_modules/@agile-central-technical-services/utils-ancestor-pi-inline-filter/index.js",
+        "src/javascript/utils/*.js",
+        "src/javascript/*.js"
+    ]
+}
