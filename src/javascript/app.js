@@ -7,20 +7,33 @@ Ext.define("committed-vs-delivered", {
         align: 'stretch'
     },
     items: [{
-        id: Utils.AncestorPiAppFilter.RENDER_AREA_ID,
-        xtype: 'container',
-        layout: {
-            type: 'hbox',
-            align: 'middle',
-            defaultMargins: '0 10 10 0',
+            id: Utils.AncestorPiAppFilter.RENDER_AREA_ID,
+            xtype: 'container',
+            layout: {
+                type: 'hbox',
+                align: 'middle',
+                defaultMargins: '0 10 10 0',
+            }
+        }, {
+            id: 'controls-area',
+            xtype: 'container',
+            layout: {
+                type: 'hbox',
+                align: 'middle',
+                defaultMargins: '0 10 10 0',
+            }
+        }, {
+            xtype: 'container',
+            itemId: 'filters-area'
+        },
+        {
+            id: 'grid-area',
+            xtype: 'container',
+            flex: 1,
+            type: 'vbox',
+            align: 'stretch'
         }
-    }, {
-        id: 'grid-area',
-        xtype: 'container',
-        flex: 1,
-        type: 'vbox',
-        align: 'stretch'
-    }],
+    ],
     config: {
         defaultSettings: {
             iterationCount: 5,
@@ -34,6 +47,7 @@ Ext.define("committed-vs-delivered", {
     },
 
     currentData: [],
+    settingsChanged: false,
 
     onTimeboxScopeChange: function(newTimeboxScope) {
         this.callParent(arguments);
@@ -41,6 +55,8 @@ Ext.define("committed-vs-delivered", {
     },
 
     launch: function() {
+        this.modelName = 'HierarchicalRequirement';
+
         this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
             ptype: 'UtilsAncestorPiAppFilter',
             pluginId: 'ancestorFilterPlugin',
@@ -57,7 +73,7 @@ Ext.define("committed-vs-delivered", {
                             this.portfolioItemTypes = _.sortBy(portfolioItemTypes, function(type) {
                                 return type.get('Ordinal');
                             });
-
+                            this.addControls();
                             plugin.addListener({
                                 scope: this,
                                 select: this.viewChange
@@ -74,13 +90,101 @@ Ext.define("committed-vs-delivered", {
         this.addPlugin(this.ancestorFilterPlugin);
     },
 
+    addControls: function() {
+        var context = this.getContext();
+        var controlsArea = this.down('#controls-area');
+
+        // Add column picker first so we know what fields to fetch during artifact load
+        var alwaysSelectedColumns = ['FormattedID', 'Name'];
+        controlsArea.add({
+            xtype: 'tsfieldpickerbutton',
+            modelNames: [this.modelName],
+            _fields: Constants.DEFAULT_FIELDS,
+            context: context,
+            stateful: true,
+            stateId: context.getScopedStateId(this.modelName + 'fields'), // columns specific to type of object
+            //alwaysSelectedValues: alwaysSelectedColumns,
+            listeners: {
+                fieldsupdated: function(fields) {
+                    this.viewChange();
+                },
+                scope: this
+            }
+        });
+
+        // Add in-line filters
+        controlsArea.add({
+            xtype: 'rallyinlinefilterbutton',
+            modelNames: [this.modelName],
+            context: context,
+            stateful: true,
+            stateId: context.getScopedStateId(this.modelName + 'filters'), // filters specific to type of object
+            inlineFilterPanelConfig: {
+                quickFilterPanelConfig: {
+                    // Supply a list of Portfolio Item Types. For example `Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes()`
+                    portfolioItemTypes: this.portfolioItemTypes,
+                    // Set the TypePath of the model item that is being filtered. For example: 'PortfolioItem/Feature' or 'Defect'
+                    modelName: this.modelName
+                }
+            },
+            listeners: {
+                inlinefilterready: this.addInlineFilterPanel,
+                inlinefilterchange: function(cmp) {
+                    // This component fires change before it is fully added. Capture the
+                    // reference to the filter button in the change handler so it can be used
+                    // by loadPrimaryStories. Attempts to get to
+                    // the button by using this.down('rallyinlinefilterbutton') will return null
+                    // at this point.
+                    this.filterButton = cmp;
+                    this.viewChange();
+                    //this.renderChart(this.data);
+                },
+                scope: this
+            }
+        });
+    },
+
+    addInlineFilterPanel: function(panel) {
+        this.down('#filters-area').add(panel);
+    },
+
+    getFieldsFromButton: function() {
+        var fieldPicker = this.down('tsfieldpickerbutton');
+        var result = [];
+        if (fieldPicker) {
+            result = fieldPicker.getFields();
+        }
+        return result;
+    },
+
+    getExportFieldsHash: function() {
+        var fields = this.getFieldsFromButton();
+        fields = fields.concat(Constants.DERIVED_FIELDS);
+        return _.reduce(fields, function(accum, field) {
+            accum[field] = field;
+            return accum;
+        }, {});
+    },
+
+    getFiltersFromButton: function() {
+        var filters = null;
+        try {
+            filters = this.filterButton.getWsapiFilter()
+        }
+        catch (ex) {
+            // Ignore if filter button not yet available
+        }
+
+        return filters;
+    },
+
     // Usual monkey business to size gridboards
     onResize: function() {
         this.callParent(arguments);
         var gridArea = this.down('#grid-area');
         var gridboard = this.down('rallygridboard');
         if (gridArea && gridboard) {
-            gridboard.setHeight(gridArea.getHeight())
+            gridboard.setHeight(gridArea.getHeight() - Constants.APP_RESERVED_HEIGHT)
         }
     },
 
@@ -117,16 +221,19 @@ Ext.define("committed-vs-delivered", {
                                 // We can't get other data like accepted date
                                 // as part of the planned/unplanned lookback query because then we'd have
                                 // to compress potentially many snapshots on the client side.
-                                var oidFilter = Rally.data.wsapi.Filter.or(oidQueries);
+                                var filters = Rally.data.wsapi.Filter.or(oidQueries);
+
+                                var advancedFilters = this.getFiltersFromButton();
+                                if (advancedFilters) {
+                                    filters = filters.and(advancedFilters);
+                                }
+
                                 var artifactStore = Ext.create('Rally.data.wsapi.Store', {
                                     model: 'HierarchicalRequirement',
-                                    fetch: ['FormattedID', 'Name', 'ScheduleState', 'AcceptedDate'],
-                                    FormattedID: '',
+                                    fetch: this.getFieldsFromButton(),
                                     autoLoad: false,
                                     enablePostGet: true,
-                                    filters: [
-                                        oidFilter,
-                                    ]
+                                    filters: filters
                                 });
                                 return artifactStore.load().then({
                                     scope: this,
@@ -162,121 +269,132 @@ Ext.define("committed-vs-delivered", {
         }).then({
             scope: this,
             success: function(data) {
-                var sortedData = _.sortBy(data, function(datum) {
-                    return datum.iteration.get('StartDate').toISOString();
-                });
-                var iterationNames = [];
-                var plannedCommitted = [];
-                var plannedDelivered = [];
-                var unplannedComitted = [];
-                var unplannedDelivered = [];
-                this.currentData = [];
-                _.each(sortedData, function(datum, index, collection) {
-                    var pc = 0,
-                        pd = 0,
-                        uc = 0,
-                        ud = 0;
-
-                    var iterationName = datum.iteration.get('Name');
-                    // If this is the current in-progress iteration, annotate its name
-                    if (this.getSetting('currentIteration') && index == collection.length - 1) {
-                        if (datum.iteration.get('EndDate') >= new Date()) {
-                            iterationName = iterationName + Constants.IN_PROGRESS;
-                        }
-                    }
-                    iterationNames.push(iterationName);
-
-                    if (datum.artifactStore) {
-                        datum.artifactStore.each(function(artifact) {
-                            this.currentData.push(artifact.data);
-                            if (artifact.get('Planned')) {
-                                pc++; // Committed and planned
-                                if (artifact.get('Delivered')) {
-                                    pd++ // Planned and delivered
-                                }
-                            }
-                            else {
-                                uc++; // Comitted and unplanned 
-                                if (artifact.get('Delivered')) {
-                                    ud++ // Unplanned and delivered
-                                }
-                            }
-                        }, this);
-                    }
-                    plannedCommitted.push(pc);
-                    plannedDelivered.push(pd);
-                    unplannedComitted.push(uc);
-                    unplannedDelivered.push(ud);
-                }, this);
-
-                return {
-                    xtype: 'rallychart',
-                    chartColors: [
-                        "#FAD200", // $yellow
-                        "#8DC63F", // $lime
-                    ],
-                    chartConfig: {
-                        chart: {
-                            type: 'column'
-                        },
-                        title: {
-                            text: Constants.CHART_TITLE
-                        },
-                        plotOptions: {
-                            column: {
-                                stacking: 'normal'
-                            },
-                            series: {
-                                dataLabels: {
-                                    align: 'center',
-                                    verticalAlign: 'top',
-                                    rotation: -90,
-                                }
-                            }
-                        },
-                        yAxis: {
-                            allowDecimals: false
-                        }
-                    },
-                    chartData: {
-                        categories: iterationNames,
-                        series: [{
-                            dataLabels: {
-                                enabled: true,
-                                format: '{total} ' + Constants.COMMITTED,
-                                inside: false,
-                                y: -40
-                            },
-                            data: unplannedComitted,
-                            stack: 0,
-                            legendIndex: 2,
-                            name: Constants.UNPLANNED
-                        }, {
-                            data: plannedCommitted,
-                            stack: 0,
-                            legendIndex: 1,
-                            name: Constants.PLANNED
-                        }, {
-                            dataLabels: {
-                                enabled: true,
-                                format: '{total} ' + Constants.DELIVERED,
-                                inside: false,
-                                y: -40
-                            },
-                            data: unplannedDelivered,
-                            stack: 1,
-                            showInLegend: false,
-                            name: Constants.UNPLANNED
-                        }, {
-                            data: plannedDelivered,
-                            stack: 1,
-                            showInLegend: false,
-                            name: Constants.PLANNED
-                        }]
-                    }
-                }
+                this.data = data;
+                return this.renderChart(this.data);
             }
         });
+    },
+
+    renderChart: function(data) {
+        var sortedData = _.sortBy(data, function(datum) {
+            return datum.iteration.get('StartDate').toISOString();
+        });
+        var iterationNames = [];
+        var plannedCommitted = [];
+        var plannedDelivered = [];
+        var unplannedComitted = [];
+        var unplannedDelivered = [];
+        this.currentData = [];
+        _.each(sortedData, function(datum, index, collection) {
+            var pc = 0,
+                pd = 0,
+                uc = 0,
+                ud = 0;
+
+            var iterationName = datum.iteration.get('Name');
+            // If this is the current in-progress iteration, annotate its name
+            if (this.getSetting('currentIteration') && index == collection.length - 1) {
+                if (datum.iteration.get('EndDate') >= new Date()) {
+                    iterationName = iterationName + Constants.IN_PROGRESS;
+                }
+            }
+            iterationNames.push(iterationName);
+
+            if (datum.artifactStore) {
+                datum.artifactStore.each(function(artifact) {
+                    this.currentData.push(artifact.data);
+                    if (artifact.get('Planned')) {
+                        pc++; // Committed and planned
+                        if (artifact.get('Delivered')) {
+                            pd++ // Planned and delivered
+                        }
+                    }
+                    else {
+                        uc++; // Comitted and unplanned 
+                        if (artifact.get('Delivered')) {
+                            ud++ // Unplanned and delivered
+                        }
+                    }
+                }, this);
+            }
+            plannedCommitted.push(pc);
+            plannedDelivered.push(pd);
+            unplannedComitted.push(uc);
+            unplannedDelivered.push(ud);
+        }, this);
+
+        return {
+            xtype: 'rallychart',
+            loadMask: false,
+            chartColors: [
+                "#FAD200", // $yellow
+                "#8DC63F", // $lime
+            ],
+            chartConfig: {
+                chart: {
+                    type: 'column',
+                    animation: false
+                },
+                title: {
+                    text: Constants.CHART_TITLE
+                },
+                plotOptions: {
+                    column: {
+                        stacking: 'normal'
+                    },
+                    series: {
+                        animation: false,
+                        dataLabels: {
+                            align: 'center',
+                            verticalAlign: 'top',
+                            rotation: -90,
+                        }
+                    }
+                },
+                yAxis: {
+                    allowDecimals: false,
+                    title: {
+                        text: Constants.Y_AXIS_TITLE
+                    }
+                }
+            },
+            chartData: {
+                categories: iterationNames,
+                series: [{
+                    dataLabels: {
+                        enabled: true,
+                        format: '{total} ' + Constants.COMMITTED,
+                        inside: false,
+                        y: -40
+                    },
+                    data: unplannedComitted,
+                    stack: 0,
+                    legendIndex: 2,
+                    name: Constants.UNPLANNED
+                }, {
+                    data: plannedCommitted,
+                    stack: 0,
+                    legendIndex: 1,
+                    name: Constants.PLANNED
+                }, {
+                    dataLabels: {
+                        enabled: true,
+                        format: '{total} ' + Constants.DELIVERED,
+                        inside: false,
+                        y: -40
+                    },
+                    data: unplannedDelivered,
+                    stack: 1,
+                    showInLegend: false,
+                    name: Constants.UNPLANNED
+                }, {
+                    data: plannedDelivered,
+                    stack: 1,
+                    showInLegend: false,
+                    name: Constants.PLANNED
+                }]
+            }
+        }
     },
 
     getIterations: function() {
@@ -376,6 +494,23 @@ Ext.define("committed-vs-delivered", {
             }
         ]);
         var dataContext = this.getContext().getDataContext();
+
+        var filters = [{
+                property: '_TypeHierarchy',
+                value: 'HierarchicalRequirement'
+            },
+            {
+                property: 'Iteration',
+                operator: 'in',
+                value: iterationOids
+            },
+            {
+                property: '_ProjectHierarchy',
+                value: Rally.util.Ref.getOidFromRef(dataContext.project)
+            },
+            dateFilter
+        ];
+
         var store = Ext.create('Rally.data.lookback.SnapshotStore', {
             autoLoad: false,
             context: dataContext,
@@ -383,22 +518,8 @@ Ext.define("committed-vs-delivered", {
             hydrate: ['Iteration'],
             remoteSort: false,
             compress: true,
-            enablePostGet: true,
-            filters: [{
-                    property: '_TypeHierarchy',
-                    value: 'HierarchicalRequirement'
-                },
-                {
-                    property: 'Iteration',
-                    operator: 'in',
-                    value: iterationOids
-                },
-                {
-                    property: '_ProjectHierarchy',
-                    value: Rally.util.Ref.getOidFromRef(dataContext.project)
-                },
-                dateFilter
-            ],
+            enablePostGet: true, // TODO (tj) verify POST is used
+            filters: filters,
         });
         return store.load();
     },
@@ -430,83 +551,124 @@ Ext.define("committed-vs-delivered", {
             context: context,
             modelNames: this.modelNames,
             toggleState: 'chart',
-            height: gridArea.getHeight(),
+            height: gridArea.getHeight() - Constants.APP_RESERVED_HEIGHT,
             chartConfig: chartConfig,
             listeners: {
                 scope: this,
                 viewchange: this.viewChange,
             },
-            plugins: [
-                /*{
-                                    ptype: 'rallygridboardinlinefiltercontrol',
-                                    inlineFilterButtonConfig: {
-                                        stateful: true,
-                                        stateId: this.getModelScopedStateId(currentModelName, 'filters'),
-                                        modelNames: this.modelNames,
-                                        inlineFilterPanelConfig: {
-                                            quickFilterPanelConfig: {
-                                                portfolioItemTypes: this.portfolioItemTypes,
-                                                modelName: currentModelName,
-                                                whiteListFields: [
-                                                    'Tags',
-                                                    'Milestones'
-                                                ]
-                                            }
-                                        }
-                                    }
-                                },*/
-                /*
-                                {
-                                    ptype: 'rallygridboardfieldpicker',
-                                    headerPosition: 'left',
-                                    modelNames: this.modelNames,
-                                    stateful: true,
-                                    stateId: this.getModelScopedStateId(currentModelName, 'fields')
-                                },*/
-                {
-                    ptype: 'rallygridboardactionsmenu',
-                    menuItems: [{
-                        text: 'Export to CSV...',
-                        handler: function() {
-                            var csvText = CArABU.technicalservices.FileUtilities.convertDataArrayToCSVText(this.currentData, {
-                                FormattedID: 'ID',
-                                Name: 'Name',
-                                ScheduleState: 'Schedule State',
-                                IterationName: 'Iteration Name',
-                                IterationStartDate: 'Iteration Start',
-                                IterationEndDate: 'Iteration End',
-                                IterationAddedDate: 'Date added to iteration',
-                                AcceptedDate: 'Accepted Date',
-                                Planned: 'Planned',
-                                Delivered: 'Delivered',
-                            });
-                            CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'comitted.csv');
-                        },
-                        scope: this
-                    }],
-                    buttonConfig: {
-                        iconCls: 'icon-export'
-                    }
+            plugins: [{
+                ptype: 'rallygridboardactionsmenu',
+                menuItems: [{
+                    text: 'Export to CSV...',
+                    handler: function() {
+                        var csvText = CArABU.technicalservices.FileUtilities.convertDataArrayToCSVText(this.currentData, this.getExportFieldsHash());
+                        CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'comitted.csv');
+                    },
+                    scope: this
+                }],
+                buttonConfig: {
+                    iconCls: 'icon-export'
+                }
+            }, {
+                ptype: 'tsconfig',
+                title: 'Settings',
+                configItems: this.getConfigItems(),
+                listeners: {
+                    scope: this,
+                    close: this.onSettingsClose
                 },
-                /*
-                                {
-                                    ptype: 'rallygridboardsharedviewcontrol',
-                                    sharedViewConfig: {
-                                        enableUrlSharing: this.getSetting('enableUrlSharing'),
-                                        stateful: true,
-                                        stateId: this.getModelScopedStateId(currentModelName, 'views'),
-                                        stateEvents: ['select', 'beforedestroy']
-                                    },
-                                }*/
-            ]
+                buttonConfig: {
+                    iconCls: 'icon-cog'
+                }
+            }]
         });
     },
 
+    getConfigItems: function() {
+        return [{
+            xtype: 'rallynumberfield',
+            name: 'iterationCount',
+            value: this.getSetting('iterationCount'),
+            fieldLabel: "Iteration Count",
+            labelWidth: 150,
+            minValue: 1,
+            allowDecimals: false,
+            listeners: {
+                scope: this,
+                change: function(field, newValue, oldValue) {
+                    if (newValue != oldValue) {
+                        this.updateSettingsValues({
+                            settings: {
+                                iterationCount: newValue
+                            }
+                        });
+                    }
+                }
+            }
+        }, {
+            xtype: 'rallynumberfield',
+            name: 'planningWindow',
+            value: this.getSetting('planningWindow'),
+            fieldLabel: 'Days after Iteration start an item is considered "planned"',
+            labelWidth: 150,
+            minValue: 0,
+            allowDecimals: false,
+            listeners: {
+                scope: this,
+                change: function(field, newValue, oldValue) {
+                    if (newValue != oldValue) {
+                        this.updateSettingsValues({
+                            settings: {
+                                planningWindow: newValue
+                            }
+                        });
+                    }
+                }
+            }
+        }, {
+            xtype: 'rallycheckboxfield',
+            name: 'currentIteration',
+            value: this.getSetting('currentIteration'),
+            fieldLabel: 'Show current, in-progress iteration',
+            labelWidth: 150,
+            listeners: {
+                scope: this,
+                change: function(field, newValue, oldValue) {
+                    if (newValue != oldValue) {
+                        this.updateSettingsValues({
+                            settings: {
+                                currentIteration: newValue
+                            }
+                        });
+                    }
+                }
+            }
+        }]
+    },
+
     viewChange: function() {
+        this.setLoading(true);
         this._buildChartConfig().then({
             scope: this,
-            success: this._addGridboard
+            success: function(chartConfig) {
+                this._addGridboard(chartConfig);
+                this.setLoading(false);
+            }
         });
+    },
+
+    onSettingsClose: function() {
+        // Don't redraw the app unless something has changed
+        if (this.settingsChanged) {
+            this.settingsChanged = false;
+            this.viewChange();
+        }
+    },
+
+    updateSettingsValues: function(options) {
+        this.settingsChanged = true;
+        this.callParent(arguments);
     },
 
     getModelScopedStateId: function(modelName, id) {
@@ -517,22 +679,12 @@ Ext.define("committed-vs-delivered", {
         return this.ancestorFilterPlugin.getIgnoreProjectScope();
     },
 
+    /*
+    disabled for now
     getSettingsFields: function() {
         return [{
-            xtype: 'rallynumberfield',
-            name: 'iterationCount',
-            fieldLabel: "Iteration Count",
-            labelWidth: 150
-        }, {
-            xtype: 'rallynumberfield',
-            name: 'planningWindow',
-            fieldLabel: 'Days after Iteration start an item is considered "planned"',
-            labelWidth: 150
-        }, {
-            xtype: 'rallycheckboxfield',
-            name: 'currentIteration',
-            fieldLabel: 'Show current, in-progress iteration',
-            labelWidth: 150
+            xtype: 'container'
         }]
     }
+    */
 });
