@@ -14,18 +14,11 @@ Ext.define("committed-vs-delivered", {
                 align: 'middle',
                 defaultMargins: '0 10 10 0',
             }
-        }, {
-            id: 'controls-area',
-            xtype: 'container',
-            layout: {
-                type: 'hbox',
-                align: 'middle',
-                defaultMargins: '0 10 10 0',
-            }
-        }, {
-            xtype: 'container',
-            itemId: 'filters-area'
         },
+        /* {
+                    xtype: 'container',
+                    itemId: 'filters-area'
+                },*/
         {
             id: 'grid-area',
             xtype: 'container',
@@ -73,7 +66,6 @@ Ext.define("committed-vs-delivered", {
                             this.portfolioItemTypes = _.sortBy(portfolioItemTypes, function(type) {
                                 return type.get('Ordinal');
                             });
-                            this.addControls();
                             plugin.addListener({
                                 scope: this,
                                 select: this.viewChange
@@ -88,60 +80,6 @@ Ext.define("committed-vs-delivered", {
             }
         });
         this.addPlugin(this.ancestorFilterPlugin);
-    },
-
-    addControls: function() {
-        var context = this.getContext();
-        var controlsArea = this.down('#controls-area');
-
-        // Add column picker first so we know what fields to fetch during artifact load
-        var alwaysSelectedColumns = ['FormattedID', 'Name'];
-        controlsArea.add({
-            xtype: 'tsfieldpickerbutton',
-            modelNames: [this.modelName],
-            _fields: Constants.DEFAULT_FIELDS,
-            context: context,
-            stateful: true,
-            stateId: context.getScopedStateId(this.modelName + 'fields'), // columns specific to type of object
-            //alwaysSelectedValues: alwaysSelectedColumns,
-            listeners: {
-                fieldsupdated: function(fields) {
-                    this.viewChange();
-                },
-                scope: this
-            }
-        });
-
-        // Add in-line filters
-        controlsArea.add({
-            xtype: 'rallyinlinefilterbutton',
-            modelNames: [this.modelName],
-            context: context,
-            stateful: true,
-            stateId: context.getScopedStateId(this.modelName + 'filters'), // filters specific to type of object
-            inlineFilterPanelConfig: {
-                quickFilterPanelConfig: {
-                    // Supply a list of Portfolio Item Types. For example `Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes()`
-                    portfolioItemTypes: this.portfolioItemTypes,
-                    // Set the TypePath of the model item that is being filtered. For example: 'PortfolioItem/Feature' or 'Defect'
-                    modelName: this.modelName
-                }
-            },
-            listeners: {
-                inlinefilterready: this.addInlineFilterPanel,
-                inlinefilterchange: function(cmp) {
-                    // This component fires change before it is fully added. Capture the
-                    // reference to the filter button in the change handler so it can be used
-                    // by loadPrimaryStories. Attempts to get to
-                    // the button by using this.down('rallyinlinefilterbutton') will return null
-                    // at this point.
-                    this.filterButton = cmp;
-                    this.viewChange();
-                    //this.renderChart(this.data);
-                },
-                scope: this
-            }
-        });
     },
 
     addInlineFilterPanel: function(panel) {
@@ -226,6 +164,10 @@ Ext.define("committed-vs-delivered", {
                                 var advancedFilters = this.getFiltersFromButton();
                                 if (advancedFilters) {
                                     filters = filters.and(advancedFilters);
+                                    this.advancedFiltersString = advancedFilters.toString();
+                                }
+                                else {
+                                    this.advancedFiltersString = '';
                                 }
 
                                 var artifactStore = Ext.create('Rally.data.wsapi.Store', {
@@ -558,30 +500,83 @@ Ext.define("committed-vs-delivered", {
                 viewchange: this.viewChange,
             },
             plugins: [{
-                ptype: 'rallygridboardactionsmenu',
-                menuItems: [{
-                    text: 'Export to CSV...',
-                    handler: function() {
-                        var csvText = CArABU.technicalservices.FileUtilities.convertDataArrayToCSVText(this.currentData, this.getExportFieldsHash());
-                        CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'comitted.csv');
+                    ptype: 'tsfilter',
+                    headerPosition: 'left',
+                    buttonConfig: {
+                        modelNames: [this.modelName],
+                        context: context,
+                        stateful: true,
+                        stateId: context.getScopedStateId(this.modelName + 'filters'), // filters specific to type of object
+                        inlineFilterPanelConfig: {
+                            quickFilterPanelConfig: {
+                                // Supply a list of Portfolio Item Types. For example `Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes()`
+                                portfolioItemTypes: this.portfolioItemTypes,
+                                // Set the TypePath of the model item that is being filtered. For example: 'PortfolioItem/Feature' or 'Defect'
+                                modelName: this.modelName
+                            }
+                        },
                     },
-                    scope: this
-                }],
-                buttonConfig: {
-                    iconCls: 'icon-export'
-                }
-            }, {
-                ptype: 'tsconfig',
-                title: 'Settings',
-                configItems: this.getConfigItems(),
-                listeners: {
-                    scope: this,
-                    close: this.onSettingsClose
+                    listeners: {
+                        scope: this,
+                        fc: function(cmp) {
+                            // This component fires change before it is fully added. Capture the
+                            // reference to the filter button in the change handler so it can be used
+                            // by loadPrimaryStories. Attempts to get to
+                            // the button by using this.down('rallyinlinefilterbutton') will return null
+                            // at this point.
+                            this.filterButton = cmp;
+                            var newFilters = this.getFiltersFromButton()
+                            var newFilterString = newFilters ? newFilters.toString() : '';
+                            if (this.advancedFiltersString != newFilterString) {
+                                this.advancedFiltersString = newFilterString;
+                                this.viewChange();
+                            }
+                        },
+                    }
                 },
-                buttonConfig: {
-                    iconCls: 'icon-cog'
+                {
+                    ptype: 'tsfields',
+                    headerPosition: 'left',
+                    buttonConfig: {
+                        modelNames: [this.modelName],
+                        _fields: Constants.DEFAULT_FIELDS,
+                        context: context,
+                        stateful: true,
+                        stateId: context.getScopedStateId(this.modelName + 'fields'), // columns specific to type of object
+                        //alwaysSelectedValues: alwaysSelectedColumns,
+                        listeners: {
+                            fieldsupdated: function(fields) {
+                                this.viewChange();
+                            },
+                            scope: this
+                        }
+                    }
+                }, {
+                    ptype: 'rallygridboardactionsmenu',
+                    menuItems: [{
+                        text: 'Export to CSV...',
+                        handler: function() {
+                            var csvText = CArABU.technicalservices.FileUtilities.convertDataArrayToCSVText(this.currentData, this.getExportFieldsHash());
+                            CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'comitted.csv');
+                        },
+                        scope: this
+                    }],
+                    buttonConfig: {
+                        iconCls: 'icon-export'
+                    }
+                }, {
+                    ptype: 'tsconfig',
+                    title: 'Settings',
+                    configItems: this.getConfigItems(),
+                    listeners: {
+                        scope: this,
+                        close: this.onSettingsClose
+                    },
+                    buttonConfig: {
+                        iconCls: 'icon-cog'
+                    }
                 }
-            }]
+            ]
         });
     },
 

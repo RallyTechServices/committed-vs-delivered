@@ -1,11 +1,39 @@
 (function() {
     var Ext = window.Ext4 || window.Ext;
 
-    Ext.define('TsConfig', {
+    Ext.define('TsConfigPlugin', {
         alias: 'plugin.tsconfig',
         extend: 'Ext.AbstractPlugin',
         mixins: {
-            observable: 'Ext.util.Observable'
+            observable: 'Ext.util.Observable',
+            showable: 'Rally.ui.gridboard.plugin.GridBoardControlShowable'
+        },
+
+        /**
+         * @cfg {Boolean}
+         * true to show control when in chart mode.
+         */
+        showInChartMode: true,
+
+        /**
+         * Override to configure control component to add to GridBoard.
+         * 
+         * @template
+         * @return {Object|Ext.Component|false} return component config or component to add to control header or return false to add nothing.
+         */
+        getControlCmpConfig: function() {
+            return Ext.merge(this.buttonConfig, {
+                xtype: 'rallybutton',
+                id: 'config-button',
+                style: { 'float': 'right' },
+                cls: 'secondary rly-small',
+                frame: false,
+                itemId: 'tsconfig-menu-button',
+                listeners: {
+                    click: this._onClick,
+                    scope: this
+                }
+            });
         },
 
         /**
@@ -13,6 +41,12 @@
          * Additional configuration to pass to the button
          */
         buttonConfig: {},
+
+        /**
+         * @configItems {Object[]}
+         * Objects to show int the config popover
+         */
+        configItems: [],
 
         constructor: function(config) {
             this.callParent(config);
@@ -22,26 +56,7 @@
 
         init: function(cmp) {
             this.cmp = cmp;
-            this._addButton();
-        },
-
-        configItems: [],
-
-        _addButton: function() {
-            this.cmp.getHeader().getRight().add(
-                Ext.merge(this.buttonConfig, {
-                    xtype: 'rallybutton',
-                    id: 'config-button',
-                    style: { 'float': 'right' },
-                    cls: 'secondary rly-small',
-                    frame: false,
-                    itemId: 'tsconfig-menu-button',
-                    listeners: {
-                        click: this._onClick,
-                        scope: this
-                    }
-                })
-            );
+            this.showControl();
         },
 
         _onClick: function(button) {
