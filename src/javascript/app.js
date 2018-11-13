@@ -15,10 +15,15 @@ Ext.define("committed-vs-delivered", {
                 defaultMargins: '0 10 10 0',
             }
         },
-        /* {
-                    xtype: 'container',
-                    itemId: 'filters-area'
-                },*/
+        {
+            xtype: 'container',
+            itemId: 'controls-area',
+            layout: 'hbox'
+        },
+        {
+            xtype: 'container',
+            itemId: 'filters-area',
+        },
         {
             id: 'grid-area',
             xtype: 'container',
@@ -50,40 +55,186 @@ Ext.define("committed-vs-delivered", {
     launch: function() {
         this.modelName = 'HierarchicalRequirement';
 
+        // Add the ancestor filter plugin
+        var ancestorFilterPluginPromise = Ext.create('Deft.Deferred');
         this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
             ptype: 'UtilsAncestorPiAppFilter',
             pluginId: 'ancestorFilterPlugin',
             settingsConfig: {
                 labelWidth: 150,
-                //margin: 10
             },
             listeners: {
                 scope: this,
                 ready: function(plugin) {
-                    Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes().then({
-                        scope: this,
-                        success: function(portfolioItemTypes) {
-                            this.portfolioItemTypes = _.sortBy(portfolioItemTypes, function(type) {
-                                return type.get('Ordinal');
-                            });
-                            plugin.addListener({
-                                scope: this,
-                                select: this.viewChange
-                            });
-                            this.viewChange();
-                        },
-                        failure: function(msg) {
-                            this._showError(msg);
-                        },
-                    })
+                    ancestorFilterPluginPromise.resolve();
                 },
             }
         });
         this.addPlugin(this.ancestorFilterPlugin);
+
+        // Once the ancestor filter plugin is ready, get the portfolio item types
+        // to be used in the inline filter
+        ancestorFilterPluginPromise.then({
+            scope: this,
+            success: function() {
+                return Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes()
+            }
+        }).then({
+            scope: this,
+            success: function(portfolioItemTypes) {
+                this.portfolioItemTypes = _.sortBy(portfolioItemTypes, function(type) {
+                    return type.get('Ordinal');
+                });
+            },
+            failure: function(msg) {
+                this._showError(msg);
+            },
+        }).then({
+            scope: this,
+            // Now add the other filter, config and export controls
+            success: function() {
+                return this.addControls()
+            }
+        }).then({
+            scope: this,
+            // finally, setup listeners on the ancestor filter and kick off a view change
+            success: function() {
+                this.ancestorFilterPlugin.addListener({
+                    scope: this,
+                    select: this.viewChange
+                });
+                this.viewChange();
+            }
+        })
     },
 
-    addInlineFilterPanel: function(panel) {
-        this.down('#filters-area').add(panel);
+    /**
+     * Return a promise that resolves once the controls are initialized and
+     * have initial values
+     */
+    addControls: function() {
+        var filterDeferred = Ext.create('Deft.Deferred');
+        var controlsArea = this.down('#controls-area');
+        var context = this.getContext();
+        controlsArea.add([{
+            xtype: 'rallyinlinefilterbutton',
+            modelNames: [this.modelName],
+            context: context,
+            stateful: true,
+            stateId: context.getScopedStateId(this.modelName + 'filters'), // filters specific to type of object
+            inlineFilterPanelConfig: {
+                quickFilterPanelConfig: {
+                    // Supply a list of Portfolio Item Types. For example `Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes()`
+                    portfolioItemTypes: this.portfolioItemTypes,
+                    // Set the TypePath of the model item that is being filtered. For example: 'PortfolioItem/Feature' or 'Defect'
+                    modelName: this.modelName
+                }
+            },
+            listeners: {
+                scope: this,
+                inlinefilterready: function(panel) {
+                    this.down('#filters-area').add(panel);
+                },
+
+                inlinefilterchange: function(cmp) {
+                    if (filterDeferred.getState() == 'pending') {
+                        // This is the first filter change event.
+                        // This component fires change before it is fully added. Capture the
+                        // reference to the filter button in the change handler so it can be used
+                        // by loadPrimaryStories. Attempts to get to
+                        // the button by using this.down('rallyinlinefilterbutton') will return null
+                        // at this point.
+                        this.filterButton = cmp;
+                        filterDeferred.resolve();
+                    }
+                    else {
+                        this.viewChange();
+                    }
+                },
+            }
+        }, {
+            xtype: 'tsfieldpickerbutton',
+            margin: '0',
+            modelNames: [this.modelName],
+            _fields: Constants.DEFAULT_FIELDS,
+            context: context,
+            stateful: true,
+            stateId: context.getScopedStateId(this.modelName + 'fields'), // columns specific to type of object
+            //alwaysSelectedValues: alwaysSelectedColumns,
+            listeners: {
+                fieldsupdated: function(fields) {
+                    this.viewChange();
+                },
+                scope: this
+            }
+        }, {
+            xtype: 'container',
+            flex: 1
+        }, {
+            xtype: 'rallybutton',
+            style: { 'float': 'right' },
+            cls: 'secondary rly-small',
+            frame: false,
+            itemId: 'actions-menu-button',
+            iconCls: 'icon-export',
+            listeners: {
+                click: function(button) {
+                    var menu = Ext.widget({
+                        xtype: 'rallymenu',
+                        items: [{
+                            text: 'Export to CSV...',
+                            handler: function() {
+                                var csvText = CArABU.technicalservices.FileUtilities.convertDataArrayToCSVText(this.currentData, this.getExportFieldsHash());
+                                CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'comitted.csv');
+                            },
+                            scope: this
+                        }]
+                    });
+                    menu.showBy(button.getEl());
+                    if (button.toolTip) {
+                        button.toolTip.hide();
+                    }
+                },
+                scope: this
+            }
+        }, {
+            xtype: 'rallybutton',
+            id: 'config-button',
+            style: { 'float': 'right' },
+            cls: 'secondary rly-small',
+            iconCls: 'icon-cog',
+            frame: false,
+            itemId: 'tsconfig-menu-button',
+            listeners: {
+                click: function(button) {
+                    var menu = Ext.widget({
+                        xtype: 'rallypopover',
+                        floating: true,
+                        target: 'config-button',
+                        showChevron: false,
+                        items: [{
+                            xtype: 'container',
+                            cls: 'settings-popover',
+                            padding: '10',
+                            items: this.getConfigItems()
+                        }],
+                        title: 'Settings',
+                        listeners: {
+                            scope: this,
+                            // Must use destroy to catch all cases of dismissing the popover
+                            destroy: this.onSettingsClose
+                        }
+                    });
+                    menu.showBy(button.getEl());
+                    if (button.toolTip) {
+                        button.toolTip.hide();
+                    }
+                },
+                scope: this
+            }
+        }]);
+
+        return filterDeferred.promise;
     },
 
     getFieldsFromButton: function() {
@@ -498,85 +649,7 @@ Ext.define("committed-vs-delivered", {
             listeners: {
                 scope: this,
                 viewchange: this.viewChange,
-            },
-            plugins: [{
-                    ptype: 'tsfilter',
-                    headerPosition: 'left',
-                    buttonConfig: {
-                        modelNames: [this.modelName],
-                        context: context,
-                        stateful: true,
-                        stateId: context.getScopedStateId(this.modelName + 'filters'), // filters specific to type of object
-                        inlineFilterPanelConfig: {
-                            quickFilterPanelConfig: {
-                                // Supply a list of Portfolio Item Types. For example `Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes()`
-                                portfolioItemTypes: this.portfolioItemTypes,
-                                // Set the TypePath of the model item that is being filtered. For example: 'PortfolioItem/Feature' or 'Defect'
-                                modelName: this.modelName
-                            }
-                        },
-                    },
-                    listeners: {
-                        scope: this,
-                        fc: function(cmp) {
-                            // This component fires change before it is fully added. Capture the
-                            // reference to the filter button in the change handler so it can be used
-                            // by loadPrimaryStories. Attempts to get to
-                            // the button by using this.down('rallyinlinefilterbutton') will return null
-                            // at this point.
-                            this.filterButton = cmp;
-                            var newFilters = this.getFiltersFromButton()
-                            var newFilterString = newFilters ? newFilters.toString() : '';
-                            if (this.advancedFiltersString != newFilterString) {
-                                this.advancedFiltersString = newFilterString;
-                                this.viewChange();
-                            }
-                        },
-                    }
-                },
-                {
-                    ptype: 'tsfields',
-                    headerPosition: 'left',
-                    buttonConfig: {
-                        modelNames: [this.modelName],
-                        _fields: Constants.DEFAULT_FIELDS,
-                        context: context,
-                        stateful: true,
-                        stateId: context.getScopedStateId(this.modelName + 'fields'), // columns specific to type of object
-                        //alwaysSelectedValues: alwaysSelectedColumns,
-                        listeners: {
-                            fieldsupdated: function(fields) {
-                                this.viewChange();
-                            },
-                            scope: this
-                        }
-                    }
-                }, {
-                    ptype: 'rallygridboardactionsmenu',
-                    menuItems: [{
-                        text: 'Export to CSV...',
-                        handler: function() {
-                            var csvText = CArABU.technicalservices.FileUtilities.convertDataArrayToCSVText(this.currentData, this.getExportFieldsHash());
-                            CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'comitted.csv');
-                        },
-                        scope: this
-                    }],
-                    buttonConfig: {
-                        iconCls: 'icon-export'
-                    }
-                }, {
-                    ptype: 'tsconfig',
-                    title: 'Settings',
-                    configItems: this.getConfigItems(),
-                    listeners: {
-                        scope: this,
-                        close: this.onSettingsClose
-                    },
-                    buttonConfig: {
-                        iconCls: 'icon-cog'
-                    }
-                }
-            ]
+            }
         });
     },
 
