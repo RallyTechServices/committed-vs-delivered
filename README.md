@@ -7,11 +7,29 @@ For each iteration in the current project show the number of stories where:
 * planned - committed story was assigned to the iteration before the planning period ended
 * unplanned - committed story was assigned to the iteration after the planning period ended
 
+Other features:
+* Advanced filter for stories
+* Data export as CSV
+* Configurable data attributes for export, but always includes:
+  * `FormattedID`
+  * `Name`
+  * `IterationStartDate`
+  * `IterationEndDate`
+  * `IterationAddedDate`
+  * `Planned`
+  * `Delivered`
+* Configurable:
+  * Number of iterations to look back
+  * Days after iteration start that and item can be added to an iteration and still be considered "Planned"
+  * Show the current (in-progress) iteration.
+
 ## Caveats
 
 The chart only shows stories that *currently* exist. Stories that have been deleted are
 not shown.
-Current project or below.
+Applied to current project or below.
+
+![screenshot](screenshot.png "Screenshot")
 
 ## Development Notes
 
