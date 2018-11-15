@@ -9,9 +9,10 @@ Ext.define('Constants', {
         Y_AXIS_TITLE: 'Count',
         APP_RESERVED_HEIGHT: 60,
         DERIVED_FIELDS: [
-            'IterationStartDate',
-            'IterationEndDate',
-            'IterationAddedDate',
+            'timeboxName',
+            'timeboxStartDate',
+            'timeboxEndDate',
+            'timeboxAddedDate',
             'Planned',
             'Delivered'
         ],
@@ -21,6 +22,10 @@ Ext.define('Constants', {
             'ScheduleState',
             'Iteration',
             'AcceptedDate',
-        ]
+        ],
+        TIMEBOX_TYPE_ITERATION: 'Iteration',
+        TIMEBOX_TYPE_RELEASE: 'Release',
+        TIMEBOX_TYPE_ITERATION_LABEL: 'Iteration',
+        TIMEBOX_TYPE_RELEASE_LABEL: 'Release'
     }
 });

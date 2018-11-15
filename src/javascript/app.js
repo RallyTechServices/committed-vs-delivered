@@ -34,9 +34,10 @@ Ext.define("committed-vs-delivered", {
     ],
     config: {
         defaultSettings: {
-            iterationCount: 5,
+            timeboxType: Constants.TIMEBOX_TYPE_ITERATION,
+            timeboxCount: 5,
             planningWindow: 2,
-            currentIteration: true
+            currentTimebox: true
         }
     },
 
@@ -47,13 +48,23 @@ Ext.define("committed-vs-delivered", {
     currentData: [],
     settingsChanged: false,
 
-    onTimeboxScopeChange: function(newTimeboxScope) {
+    onTimeboxScopeChange: function(scope) {
         this.callParent(arguments);
         this.viewChange();
     },
 
     launch: function() {
         this.modelName = 'HierarchicalRequirement';
+        this.timeboxType = this.getSetting('timeboxType');
+
+        if (this.timeboxType == Constants.TIMEBOX_TYPE_RELEASE) {
+            this.timeboxStartDateField = 'ReleaseStartDate';
+            this.timeboxEndDateField = 'ReleaseDate';
+        }
+        else if (this.timeboxType == Constants.TIMEBOX_TYPE_ITERATION) {
+            this.timeboxStartDateField = 'StartDate';
+            this.timeboxEndDateField = 'EndDate'
+        }
 
         // Add the ancestor filter plugin
         var ancestorFilterPluginPromise = Ext.create('Deft.Deferred');
@@ -278,21 +289,22 @@ Ext.define("committed-vs-delivered", {
     },
 
     _buildChartConfig: function() {
-        // Get the last N iterations
-        return this.getIterations().then({
+        // Get the last N timeboxes
+        return this.getTimeboxes().then({
             scope: this,
-            success: function(iterationGroups) {
-                var promises = _.map(iterationGroups, function(iterationGroup) {
-                    var iteration = iterationGroup[0]; // Representative iteration for the group
-                    var planningWindowEndIso = Ext.Date.add(iteration.get('StartDate'), Ext.Date.DAY, this.getSetting('planningWindow')).toISOString();
-                    var iterationEndIso = iteration.get('EndDate').toISOString();
+            success: function(timeboxGroups) {
+                var promises = _.map(timeboxGroups, function(timeboxGroup) {
+                    var timebox = timeboxGroup[0]; // Representative timebox for the group
+                    var planningWindowEndIso = Ext.Date.add(timebox.get(this.timeboxStartDateField), Ext.Date.DAY, this.getSetting('planningWindow')).toISOString();
+                    var timeboxEndIso = timebox.get(this.timeboxEndDateField).toISOString();
+                    var timeboxStartIso = timebox.get(this.timeboxStartDateField).toISOString();
                     var snapshotByOid = {}
-                    return this.getSnapshotsFromIterationGroup(iterationGroup).then({
+                    return this.getSnapshotsFromTimeboxGroup(timeboxGroup).then({
                         scope: this,
                         success: function(snapshots) {
                             if (!snapshots || snapshots.length == 0) {
                                 return {
-                                    iteration: iteration,
+                                    timebox: timebox,
                                     artifactStore: null
                                 }
                             }
@@ -331,7 +343,7 @@ Ext.define("committed-vs-delivered", {
                                 return artifactStore.load().then({
                                     scope: this,
                                     success: function(artifacts) {
-                                        // Augment each artifact with Planned, Delivered and Iteration Added Date
+                                        // Augment each artifact with Planned, Delivered and timebox Added Date
                                         _.each(artifacts, function(artifact) {
                                             var snapshot = snapshotByOid[artifact.get('ObjectID')];
                                             var validFrom = snapshot.get('_ValidFrom')
@@ -339,16 +351,25 @@ Ext.define("committed-vs-delivered", {
                                                 artifact.set('Planned', true);
                                             }
                                             var acceptedDate = artifact.get('AcceptedDate');
-                                            if (acceptedDate && acceptedDate.toISOString() <= iterationEndIso) {
-                                                artifact.set('Delivered', true);
+                                            if (acceptedDate) {
+                                                var acceptedIso = acceptedDate.toISOString();
+                                                if (acceptedIso <= timeboxEndIso) {
+                                                    artifact.set('Delivered', true);
+                                                }
+                                                // Special case where artifact may be assigned to timeboxes that occur after
+                                                // its accepted date. We may want to render these differently so they don't
+                                                // show up as 'Delivered' in multiple timeboxes.
+                                                if (acceptedIso < timeboxStartIso) {
+                                                    artifact.set('AcceptedBeforeTimeboxStart', true);
+                                                }
                                             }
-                                            artifact.set('IterationAddedDate', validFrom);
-                                            artifact.set('IterationName', iteration.get('Name'));
-                                            artifact.set('IterationStartDate', iteration.get('StartDate'));
-                                            artifact.set('IterationEndDate', iteration.get('EndDate'))
+                                            artifact.set('timeboxAddedDate', validFrom);
+                                            artifact.set('timeboxName', timebox.get('Name'));
+                                            artifact.set('timeboxStartDate', timebox.get(this.timeboxStartDateField));
+                                            artifact.set('timeboxEndDate', timebox.get(this.timeboxEndDateField))
                                         }, this);
                                         return {
-                                            iteration: iteration,
+                                            timebox: timebox,
                                             artifactStore: artifactStore
                                         }
                                     }
@@ -363,16 +384,16 @@ Ext.define("committed-vs-delivered", {
             scope: this,
             success: function(data) {
                 this.data = data;
-                return this.renderChart(this.data);
+                return this.getChartConfig(this.data);
             }
         });
     },
 
-    renderChart: function(data) {
+    getChartConfig: function(data) {
         var sortedData = _.sortBy(data, function(datum) {
-            return datum.iteration.get('StartDate').toISOString();
-        });
-        var iterationNames = [];
+            return datum.timebox.get(this.timeboxStartDateField).toISOString();
+        }, this);
+        var timeboxNames = [];
         var plannedCommitted = [];
         var plannedDelivered = [];
         var unplannedComitted = [];
@@ -384,28 +405,35 @@ Ext.define("committed-vs-delivered", {
                 uc = 0,
                 ud = 0;
 
-            var iterationName = datum.iteration.get('Name');
-            // If this is the current in-progress iteration, annotate its name
-            if (this.getSetting('currentIteration') && index == collection.length - 1) {
-                if (datum.iteration.get('EndDate') >= new Date()) {
-                    iterationName = iterationName + Constants.IN_PROGRESS;
+            var timeboxName = datum.timebox.get('Name');
+            // If this is the current in-progress timebox, annotate its name
+            if (this.getSetting('currentTimebox') && index == collection.length - 1) {
+                if (datum.timebox.get(this.timeboxEndDateField) >= new Date()) {
+                    timeboxName = timeboxName + Constants.IN_PROGRESS;
                 }
             }
-            iterationNames.push(iterationName);
+            timeboxNames.push(timeboxName);
 
             if (datum.artifactStore) {
                 datum.artifactStore.each(function(artifact) {
-                    this.currentData.push(artifact.data);
-                    if (artifact.get('Planned')) {
-                        pc++; // Committed and planned
-                        if (artifact.get('Delivered')) {
-                            pd++ // Planned and delivered
-                        }
+                    if (artifact.get('AcceptedBeforeTimeboxStart')) {
+                        // Special case. The artifact was accepted before the timebox started. The work occurred
+                        // *before* this timebox started and is NOT therefore included in the timebox as committed
+                        // or delivered.
                     }
                     else {
-                        uc++; // Comitted and unplanned 
-                        if (artifact.get('Delivered')) {
-                            ud++ // Unplanned and delivered
+                        this.currentData.push(artifact.data);
+                        if (artifact.get('Planned')) {
+                            pc++; // Committed and planned
+                            if (artifact.get('Delivered')) {
+                                pd++ // Planned and delivered
+                            }
+                        }
+                        else {
+                            uc++; // Comitted and unplanned 
+                            if (artifact.get('Delivered')) {
+                                ud++ // Unplanned and delivered
+                            }
                         }
                     }
                 }, this);
@@ -429,7 +457,7 @@ Ext.define("committed-vs-delivered", {
                     animation: false
                 },
                 title: {
-                    text: Constants.CHART_TITLE
+                    text: Constants.CHART_TITLE + ' by ' + this.timeboxType
                 },
                 plotOptions: {
                     column: {
@@ -452,7 +480,7 @@ Ext.define("committed-vs-delivered", {
                 }
             },
             chartData: {
-                categories: iterationNames,
+                categories: timeboxNames,
                 series: [{
                     dataLabels: {
                         enabled: true,
@@ -490,48 +518,49 @@ Ext.define("committed-vs-delivered", {
         }
     },
 
-    getIterations: function() {
-        // Get the N most recent iterations in the current project
+    getTimeboxes: function() {
+        // Get the N most recent timeboxes in the current project
         // Sort by name
-        // Get iterations by name from all child projects
-        var iterationFilterProperty = 'EndDate';
-        if (this.getSetting('currentIteration')) {
-            iterationFilterProperty = 'StartDate'
+        // Get timeboxes by name from all child projects
+
+        var timeboxFilterProperty = this.timeboxEndDateField;
+        if (this.getSetting('currentTimebox')) {
+            timeboxFilterProperty = this.timeboxStartDateField;
         }
         return Ext.create('Rally.data.wsapi.Store', {
-            model: 'Iteration',
+            model: this.timeboxType,
             autoLoad: false,
             context: {
                 projectScopeDown: false,
                 projectScopeUp: false
             },
             sorters: [{
-                property: iterationFilterProperty,
+                property: timeboxFilterProperty,
                 direction: 'DESC'
             }],
             filters: [{
-                property: iterationFilterProperty,
+                property: timeboxFilterProperty,
                 operator: '<=',
                 value: 'today'
             }],
-            pageSize: this.getSetting('iterationCount')
+            pageSize: this.getSetting('timeboxCount')
         }).load().then({
             scope: this,
-            success: function(iterations) {
-                var iterationFilter = _.map(iterations, function(iteration) {
+            success: function(timeboxes) {
+                var timeboxFilter = _.map(timeboxes, function(timebox) {
                     return Rally.data.wsapi.Filter.and([{
                         property: 'Name',
-                        value: iteration.get('Name')
+                        value: timebox.get('Name')
                     }, {
-                        property: 'StartDate',
-                        value: iteration.get('StartDate')
+                        property: this.timeboxStartDateField,
+                        value: timebox.get(this.timeboxStartDateField)
                     }, {
-                        property: 'EndDate',
-                        value: iteration.get('EndDate')
+                        property: this.timeboxEndDateField,
+                        value: timebox.get(this.timeboxEndDateField)
                     }]);
-                });
-                if (iterationFilter.length) {
-                    return Rally.data.wsapi.Filter.or(iterationFilter)
+                }, this);
+                if (timeboxFilter.length) {
+                    return Rally.data.wsapi.Filter.or(timeboxFilter)
                 }
                 else {
                     return null;
@@ -539,18 +568,18 @@ Ext.define("committed-vs-delivered", {
             }
         }).then({
             scope: this,
-            success: function(iterationFilter) {
-                if (iterationFilter) {
+            success: function(timeboxFilter) {
+                if (timeboxFilter) {
                     return Ext.create('Rally.data.wsapi.Store', {
-                        model: 'Iteration',
+                        model: this.timeboxType,
                         autoLoad: false,
-                        fetch: ['ObjectID', 'StartDate', 'EndDate', 'Name'],
+                        fetch: ['ObjectID', this.timeboxStartDateField, this.timeboxEndDateField, 'Name'],
                         enablePostGet: true,
                         sorters: [{
-                            property: 'EndDate',
+                            property: this.timeboxEndDateField,
                             direction: 'DESC'
                         }],
-                        filters: [iterationFilter]
+                        filters: [timeboxFilter]
                     }).load()
                 }
                 else {
@@ -559,26 +588,26 @@ Ext.define("committed-vs-delivered", {
             }
         }).then({
             scope: this,
-            success: function(iterations) {
-                // Group by iteration name
-                return _.groupBy(iterations, function(iteration) {
-                    return iteration.get('Name');
+            success: function(timeboxes) {
+                // Group by timebox name
+                return _.groupBy(timeboxes, function(timebox) {
+                    return timebox.get('Name');
                 });
             }
         })
     },
 
-    getSnapshotsFromIterationGroup: function(iterationGroup) {
-        var iteration = iterationGroup[0]; // Representative iteration for the group
-        var iterationOids = _.map(iterationGroup, function(iteration) {
-            return iteration.get('ObjectID');
+    getSnapshotsFromTimeboxGroup: function(timeboxGroup) {
+        var timebox = timeboxGroup[0]; // Representative timebox for the group
+        var timeboxOids = _.map(timeboxGroup, function(timebox) {
+            return timebox.get('ObjectID');
         });
-        var iterationEndIso = iteration.get('EndDate').toISOString();
-        var planningWindowEndIso = Ext.Date.add(iteration.get('StartDate'), Ext.Date.DAY, this.getSetting('planningWindow')).toISOString();
+        var timeboxEndIso = timebox.get(this.timeboxEndDateField).toISOString();
+        var planningWindowEndIso = Ext.Date.add(timebox.get(this.timeboxStartDateField), Ext.Date.DAY, this.getSetting('planningWindow')).toISOString();
         var dateFilter = Rally.data.lookback.QueryFilter.and([{
                 property: '_ValidFrom',
                 operator: '<=',
-                value: iterationEndIso
+                value: timeboxEndIso
             },
             {
                 property: '_ValidTo',
@@ -593,9 +622,9 @@ Ext.define("committed-vs-delivered", {
                 value: 'HierarchicalRequirement'
             },
             {
-                property: 'Iteration',
+                property: this.timeboxType,
                 operator: 'in',
-                value: iterationOids
+                value: timeboxOids
             },
             {
                 property: '_ProjectHierarchy',
@@ -607,8 +636,8 @@ Ext.define("committed-vs-delivered", {
         var store = Ext.create('Rally.data.lookback.SnapshotStore', {
             autoLoad: false,
             context: dataContext,
-            fetch: ['Iteration', '_ValidFrom', '_ValidTo', 'ObjectID'],
-            hydrate: ['Iteration'],
+            fetch: [this.timeboxType, '_ValidFrom', '_ValidTo', 'ObjectID'],
+            hydrate: [this.timeboxType],
             remoteSort: false,
             compress: true,
             enablePostGet: true, // TODO (tj) verify POST is used
@@ -621,14 +650,12 @@ Ext.define("committed-vs-delivered", {
         var gridArea = this.down('#grid-area')
         gridArea.removeAll();
 
-        var currentModelName = 'HierarchicalRequirement';
-
         var filters = [];
         var timeboxScope = this.getContext().getTimeboxScope();
-        if (timeboxScope && timeboxScope.isApplicable(store.model)) {
+        if (timeboxScope && timeboxScope.isApplicable(this.modelName)) {
             filters.push(timeboxScope.getQueryFilter());
         }
-        var ancestorFilter = this.ancestorFilterPlugin.getFilterForType(currentModelName);
+        var ancestorFilter = this.ancestorFilterPlugin.getFilterForType(this.modelName);
         if (ancestorFilter) {
             filters.push(ancestorFilter);
         }
@@ -642,7 +669,7 @@ Ext.define("committed-vs-delivered", {
         this.gridboard = gridArea.add({
             xtype: 'rallygridboard',
             context: context,
-            modelNames: this.modelNames,
+            modelNames: [this.modelName],
             toggleState: 'chart',
             height: gridArea.getHeight() - Constants.APP_RESERVED_HEIGHT,
             chartConfig: chartConfig,
@@ -654,11 +681,40 @@ Ext.define("committed-vs-delivered", {
     },
 
     getConfigItems: function() {
+        var timeboxTypeStore = Ext.create('Ext.data.Store', {
+            fields: ['name', 'value'],
+            data: [
+                { name: Constants.TIMEBOX_TYPE_ITERATION_LABEL, value: Constants.TIMEBOX_TYPE_ITERATION },
+                { name: Constants.TIMEBOX_TYPE_RELEASE_LABEL, value: Constants.TIMEBOX_TYPE_RELEASE },
+            ]
+        });
         return [{
+            xtype: 'combobox',
+            name: 'timeboxType',
+            value: this.getSetting('timeboxType'),
+            fieldLabel: 'Timebox type',
+            labelWidth: 150,
+            store: timeboxTypeStore,
+            queryMode: 'local',
+            displayField: 'name',
+            valueField: 'value',
+            listeners: {
+                scope: this,
+                change: function(field, newValue, oldValue) {
+                    if (newValue != oldValue) {
+                        this.updateSettingsValues({
+                            settings: {
+                                timeboxType: newValue
+                            }
+                        })
+                    }
+                }
+            }
+        }, {
             xtype: 'rallynumberfield',
-            name: 'iterationCount',
-            value: this.getSetting('iterationCount'),
-            fieldLabel: "Iteration Count",
+            name: 'timeboxCount',
+            value: this.getSetting('timeboxCount'),
+            fieldLabel: "Timebox Count",
             labelWidth: 150,
             minValue: 1,
             allowDecimals: false,
@@ -668,7 +724,7 @@ Ext.define("committed-vs-delivered", {
                     if (newValue != oldValue) {
                         this.updateSettingsValues({
                             settings: {
-                                iterationCount: newValue
+                                timeboxCount: newValue
                             }
                         });
                     }
@@ -678,7 +734,7 @@ Ext.define("committed-vs-delivered", {
             xtype: 'rallynumberfield',
             name: 'planningWindow',
             value: this.getSetting('planningWindow'),
-            fieldLabel: 'Days after Iteration start an item is considered "planned"',
+            fieldLabel: 'Days after timebox start an item is considered "planned"',
             labelWidth: 150,
             minValue: 0,
             allowDecimals: false,
@@ -696,9 +752,9 @@ Ext.define("committed-vs-delivered", {
             }
         }, {
             xtype: 'rallycheckboxfield',
-            name: 'currentIteration',
-            value: this.getSetting('currentIteration'),
-            fieldLabel: 'Show current, in-progress iteration',
+            name: 'currentTimebox',
+            value: this.getSetting('currentTimebox'),
+            fieldLabel: 'Show current, in-progress timebox',
             labelWidth: 150,
             listeners: {
                 scope: this,
@@ -706,7 +762,7 @@ Ext.define("committed-vs-delivered", {
                     if (newValue != oldValue) {
                         this.updateSettingsValues({
                             settings: {
-                                currentIteration: newValue
+                                currentTimebox: newValue
                             }
                         });
                     }

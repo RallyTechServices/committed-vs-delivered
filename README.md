@@ -1,33 +1,41 @@
 # Committed vs Delivered
 
-For each iteration in the current project show the number of stories where:
-* iteration planning period - the iteration start date plus a configurable number of days (default 2)
-* committed - story was assigned to iteration before the iteration end and remained assigned after the planning period end
-* delivered - committed story was accepted before iteration end
-* planned - committed story was assigned to the iteration before the planning period ended
-* unplanned - committed story was assigned to the iteration after the planning period ended
+For either `Iteration` or `Release` timeboxes...
+
+For each timebox in the current project show the number of stories where:
+* timebox planning period - the timebox start date plus a configurable number of days (default 2)
+* committed - story was assigned to the timebox before the timebox end and remained assigned after the planning period end
+* delivered - committed story was accepted before timebox end
+* planned - committed story was assigned to the timebox before the planning period ended
+* unplanned - committed story was assigned to the timebox after the planning period ended
 
 Other features:
 * Advanced filter for stories
 * Data export as CSV
 * Configurable data attributes for export, but always includes:
   * `FormattedID`
-  * `Name`
-  * `IterationStartDate`
-  * `IterationEndDate`
-  * `IterationAddedDate`
+  * `Name`,
+  * `TimeboxName`
+  * `TimeboxStartDate`
+  * `TimeboxEndDate`
+  * `TimeboxAddedDate`
   * `Planned`
   * `Delivered`
 * Configurable:
+  * By `Release` or `Iteration` timebox type
   * Number of iterations to look back
   * Days after iteration start that and item can be added to an iteration and still be considered "Planned"
   * Show the current (in-progress) iteration.
 
 ## Caveats
-
-The chart only shows stories that *currently* exist. Stories that have been deleted are
+* Stories are only shown in timeboxes that start *before* the story accepted date.
+Accepting a story today, means the work finished in today’s timebox. If the accepted story
+is then assigned to a timebox starting next week...the work didn’t move to next week,
+it still finished today. It isn't considered committed to that subsequent timebox because there
+is nothing left to accept.
+* The chart only shows stories that *currently* exist. Stories that have been deleted are
 not shown.
-Applied to current project or below.
+* Applied to current project or below.
 
 ![screenshot](screenshot.png "Screenshot")
 
