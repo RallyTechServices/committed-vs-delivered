@@ -26,6 +26,7 @@ Ext.define('Constants', {
         TIMEBOX_TYPE_ITERATION: 'Iteration',
         TIMEBOX_TYPE_RELEASE: 'Release',
         TIMEBOX_TYPE_ITERATION_LABEL: 'Iteration',
-        TIMEBOX_TYPE_RELEASE_LABEL: 'Release'
+        TIMEBOX_TYPE_RELEASE_LABEL: 'Release',
+        SNAPSHOT_LABEL: 'Snapshot'
     }
 });

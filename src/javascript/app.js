@@ -55,16 +55,7 @@ Ext.define("committed-vs-delivered", {
 
     launch: function() {
         this.modelName = 'HierarchicalRequirement';
-        this.timeboxType = this.getSetting('timeboxType');
-
-        if (this.timeboxType == Constants.TIMEBOX_TYPE_RELEASE) {
-            this.timeboxStartDateField = 'ReleaseStartDate';
-            this.timeboxEndDateField = 'ReleaseDate';
-        }
-        else if (this.timeboxType == Constants.TIMEBOX_TYPE_ITERATION) {
-            this.timeboxStartDateField = 'StartDate';
-            this.timeboxEndDateField = 'EndDate'
-        }
+        this.setTimeboxFieldsForType(this.getSetting('timeboxType'));
 
         // Add the ancestor filter plugin
         var ancestorFilterPluginPromise = Ext.create('Deft.Deferred');
@@ -117,6 +108,19 @@ Ext.define("committed-vs-delivered", {
                 this.viewChange();
             }
         })
+    },
+
+    setTimeboxFieldsForType: function(timeboxType) {
+        this.timeboxType = timeboxType;
+
+        if (this.timeboxType == Constants.TIMEBOX_TYPE_RELEASE) {
+            this.timeboxStartDateField = 'ReleaseStartDate';
+            this.timeboxEndDateField = 'ReleaseDate';
+        }
+        else if (this.timeboxType == Constants.TIMEBOX_TYPE_ITERATION) {
+            this.timeboxStartDateField = 'StartDate';
+            this.timeboxEndDateField = 'EndDate'
+        }
     },
 
     /**
@@ -261,9 +265,31 @@ Ext.define("committed-vs-delivered", {
         var fields = this.getFieldsFromButton();
         fields = fields.concat(Constants.DERIVED_FIELDS);
         return _.reduce(fields, function(accum, field) {
-            accum[field] = field;
+            accum[field] = this.headerName(field);
             return accum;
-        }, {});
+        }, {}, this);
+    },
+
+    headerName: function(field) {
+        var result;
+        switch (field) {
+            case "Iteration":
+                result = 'CurrentIteration'
+                break;
+            case "Release":
+                result = 'CurrentRelease'
+                break;
+            case 'timeboxName':
+                result = Constants.SNAPSHOT_LABEL + this.timeboxType + 'Name';
+                break;
+            default:
+                result = field;
+        }
+        // Substitute 'IterationStartDate' for 'timeboxStartDate', etc
+        if (result.startsWith('timebox')) {
+            result = field.replace('timebox', this.timeboxType);
+        }
+        return result;
     },
 
     getFiltersFromButton: function() {
@@ -363,7 +389,7 @@ Ext.define("committed-vs-delivered", {
                                                     artifact.set('AcceptedBeforeTimeboxStart', true);
                                                 }
                                             }
-                                            artifact.set('timeboxAddedDate', validFrom);
+                                            artifact.set('timeboxAddedDate', new Date(validFrom));
                                             artifact.set('timeboxName', timebox.get('Name'));
                                             artifact.set('timeboxStartDate', timebox.get(this.timeboxStartDateField));
                                             artifact.set('timeboxEndDate', timebox.get(this.timeboxEndDateField))
@@ -468,7 +494,6 @@ Ext.define("committed-vs-delivered", {
                         dataLabels: {
                             align: 'center',
                             verticalAlign: 'top',
-                            rotation: -90,
                         }
                     }
                 },
@@ -486,7 +511,8 @@ Ext.define("committed-vs-delivered", {
                         enabled: true,
                         format: '{total} ' + Constants.COMMITTED,
                         inside: false,
-                        y: -40
+                        y: -20,
+                        overflow: 'justify'
                     },
                     data: unplannedComitted,
                     stack: 0,
@@ -502,7 +528,8 @@ Ext.define("committed-vs-delivered", {
                         enabled: true,
                         format: '{total} ' + Constants.DELIVERED,
                         inside: false,
-                        y: -40
+                        y: -20,
+                        overflow: 'justify'
                     },
                     data: unplannedDelivered,
                     stack: 1,
@@ -706,7 +733,9 @@ Ext.define("committed-vs-delivered", {
                             settings: {
                                 timeboxType: newValue
                             }
-                        })
+                        });
+                        // Choice of timebox has changed
+                        this.setTimeboxFieldsForType(newValue);
                     }
                 }
             }
