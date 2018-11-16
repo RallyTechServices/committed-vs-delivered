@@ -34,6 +34,7 @@ Ext.define("committed-vs-delivered", {
     ],
     config: {
         defaultSettings: {
+            artifactType: 'HierarchicalRequirement',
             timeboxType: Constants.TIMEBOX_TYPE_ITERATION,
             timeboxCount: 5,
             planningWindow: 2,
@@ -54,9 +55,6 @@ Ext.define("committed-vs-delivered", {
     },
 
     launch: function() {
-        this.modelName = 'HierarchicalRequirement';
-        this.setTimeboxFieldsForType(this.getSetting('timeboxType'));
-
         // Add the ancestor filter plugin
         var ancestorFilterPluginPromise = Ext.create('Deft.Deferred');
         this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
@@ -87,16 +85,13 @@ Ext.define("committed-vs-delivered", {
                 this.portfolioItemTypes = _.sortBy(portfolioItemTypes, function(type) {
                     return type.get('Ordinal');
                 });
+                this.lowestPiType = this.portfolioItemTypes[0];
+                this.setModelFieldsForType(this.getSetting('artifactType'));
+                this.setTimeboxFieldsForType(this.getSetting('timeboxType'));
             },
             failure: function(msg) {
                 this._showError(msg);
             },
-        }).then({
-            scope: this,
-            // Now add the other filter, config and export controls
-            success: function() {
-                return this.addControls()
-            }
         }).then({
             scope: this,
             // finally, setup listeners on the ancestor filter and kick off a view change
@@ -108,6 +103,14 @@ Ext.define("committed-vs-delivered", {
                 this.viewChange();
             }
         })
+    },
+
+    setModelFieldsForType: function(artifactType) {
+        this.modelName = artifactType;
+        this.acceptedDateField = 'AcceptedDate';
+        if (this.isPiTypeSelected()) {
+            this.acceptedDateField = 'ActualEndDate'
+        }
     },
 
     setTimeboxFieldsForType: function(timeboxType) {
@@ -129,8 +132,9 @@ Ext.define("committed-vs-delivered", {
      */
     addControls: function() {
         var filterDeferred = Ext.create('Deft.Deferred');
-        var controlsArea = this.down('#controls-area');
         var context = this.getContext();
+        var controlsArea = this.down('#controls-area');
+        controlsArea.removeAll();
         controlsArea.add([{
             xtype: 'rallyinlinefilterbutton',
             modelNames: [this.modelName],
@@ -157,7 +161,7 @@ Ext.define("committed-vs-delivered", {
                         // This component fires change before it is fully added. Capture the
                         // reference to the filter button in the change handler so it can be used
                         // by loadPrimaryStories. Attempts to get to
-                        // the button by using this.down('rallyinlinefilterbutton') will return null
+                        // the button by using this.down('rallyinlinefilte/rbutton') will return null
                         // at this point.
                         this.filterButton = cmp;
                         filterDeferred.resolve();
@@ -168,23 +172,31 @@ Ext.define("committed-vs-delivered", {
                 },
             }
         }, {
+            xtype: 'container',
+            flex: 1
+        }, {
             xtype: 'tsfieldpickerbutton',
-            margin: '0',
+            margin: '0 10 0 0',
+            toolTipConfig: {
+                html: 'Columns to Export',
+                anchor: 'top'
+            },
+            getTitle: function() {
+                return 'Export Columns';
+            },
             modelNames: [this.modelName],
-            _fields: Constants.DEFAULT_FIELDS,
+            _fields: this.isPiTypeSelected() ? Constants.PI_DEFAULT_FIELDS : Constants.STORY_DEFAULT_FIELDS,
             context: context,
             stateful: true,
             stateId: context.getScopedStateId(this.modelName + 'fields'), // columns specific to type of object
-            //alwaysSelectedValues: alwaysSelectedColumns,
+            // Always need the accepted date field
+            alwaysSelectedValues: Constants.ALWAYS_SELECTED_FIELDS.concat(this.acceptedDateField),
             listeners: {
                 fieldsupdated: function(fields) {
                     this.viewChange();
                 },
                 scope: this
             }
-        }, {
-            xtype: 'container',
-            flex: 1
         }, {
             xtype: 'rallybutton',
             style: { 'float': 'right' },
@@ -263,6 +275,11 @@ Ext.define("committed-vs-delivered", {
 
     getExportFieldsHash: function() {
         var fields = this.getFieldsFromButton();
+        // Special case, add the accepted date after all fields from the field picker so it
+        // is next to the derirved fields instead of in the first column of export.
+        // Use _.unique to remove duplicate as that field is also always selected.
+        fields = _.without(fields, this.acceptedDateField);
+        fields.push(this.acceptedDateField);
         fields = fields.concat(Constants.DERIVED_FIELDS);
         return _.reduce(fields, function(accum, field) {
             accum[field] = this.headerName(field);
@@ -274,21 +291,27 @@ Ext.define("committed-vs-delivered", {
         var result;
         switch (field) {
             case "Iteration":
-                result = 'CurrentIteration'
+                result = 'Currently linked to Iteration'
                 break;
             case "Release":
-                result = 'CurrentRelease'
+                result = 'Currently linked to Release'
                 break;
             case 'timeboxName':
-                result = Constants.SNAPSHOT_LABEL + this.timeboxType + 'Name';
+                result = this.timeboxType;
+                break;
+            case 'timeboxStartDate':
+                result = this.timeboxType + ' Start Date';
+                break;
+            case 'timeboxEndDate':
+                result = this.timeboxType + ' End Date';
+                break;
+            case 'timeboxAddedDate':
+                result = 'Linked to ' + this.timeboxType + ' on';
                 break;
             default:
                 result = field;
         }
-        // Substitute 'IterationStartDate' for 'timeboxStartDate', etc
-        if (result.startsWith('timebox')) {
-            result = field.replace('timebox', this.timeboxType);
-        }
+
         return result;
     },
 
@@ -360,7 +383,7 @@ Ext.define("committed-vs-delivered", {
                                 }
 
                                 var artifactStore = Ext.create('Rally.data.wsapi.Store', {
-                                    model: 'HierarchicalRequirement',
+                                    model: this.modelName,
                                     fetch: this.getFieldsFromButton(),
                                     autoLoad: false,
                                     enablePostGet: true,
@@ -376,7 +399,7 @@ Ext.define("committed-vs-delivered", {
                                             if (validFrom <= planningWindowEndIso) {
                                                 artifact.set('Planned', true);
                                             }
-                                            var acceptedDate = artifact.get('AcceptedDate');
+                                            var acceptedDate = artifact.get(this.acceptedDateField);
                                             if (acceptedDate) {
                                                 var acceptedIso = acceptedDate.toISOString();
                                                 if (acceptedIso <= timeboxEndIso) {
@@ -470,6 +493,10 @@ Ext.define("committed-vs-delivered", {
             unplannedDelivered.push(ud);
         }, this);
 
+        var title = "Stories";
+        if (this.isPiTypeSelected()) {
+            title = this.lowestPiType.get('Name') + 's';
+        }
         return {
             xtype: 'rallychart',
             loadMask: false,
@@ -483,7 +510,7 @@ Ext.define("committed-vs-delivered", {
                     animation: false
                 },
                 title: {
-                    text: Constants.CHART_TITLE + ' by ' + this.timeboxType
+                    text: title + ' ' + Constants.CHART_TITLE + ' by ' + this.timeboxType
                 },
                 plotOptions: {
                     column: {
@@ -646,7 +673,7 @@ Ext.define("committed-vs-delivered", {
 
         var filters = [{
                 property: '_TypeHierarchy',
-                value: 'HierarchicalRequirement'
+                value: this.modelName
             },
             {
                 property: this.timeboxType,
@@ -707,6 +734,10 @@ Ext.define("committed-vs-delivered", {
         });
     },
 
+    isPiTypeSelected: function() {
+        return this.modelName == this.lowestPiType.get('TypePath');
+    },
+
     getConfigItems: function() {
         var timeboxTypeStore = Ext.create('Ext.data.Store', {
             fields: ['name', 'value'],
@@ -715,9 +746,17 @@ Ext.define("committed-vs-delivered", {
                 { name: Constants.TIMEBOX_TYPE_RELEASE_LABEL, value: Constants.TIMEBOX_TYPE_RELEASE },
             ]
         });
-        return [{
+        var artifactTypeStore = Ext.create('Ext.data.Store', {
+            fields: ['name', 'value'],
+            data: [
+                { name: 'User Story', value: 'HierarchicalRequirement' },
+                { name: this.lowestPiType.get('Name'), value: this.lowestPiType.get('TypePath') },
+            ]
+        });
+        var timeboxTypeControl = Ext.create('Ext.form.field.ComboBox', {
             xtype: 'combobox',
             name: 'timeboxType',
+            id: 'timeboxType',
             value: this.getSetting('timeboxType'),
             fieldLabel: 'Timebox type',
             labelWidth: 150,
@@ -725,6 +764,7 @@ Ext.define("committed-vs-delivered", {
             queryMode: 'local',
             displayField: 'name',
             valueField: 'value',
+            disabled: this.isPiTypeSelected(),
             listeners: {
                 scope: this,
                 change: function(field, newValue, oldValue) {
@@ -739,70 +779,110 @@ Ext.define("committed-vs-delivered", {
                     }
                 }
             }
-        }, {
-            xtype: 'rallynumberfield',
-            name: 'timeboxCount',
-            value: this.getSetting('timeboxCount'),
-            fieldLabel: "Timebox Count",
-            labelWidth: 150,
-            minValue: 1,
-            allowDecimals: false,
-            listeners: {
-                scope: this,
-                change: function(field, newValue, oldValue) {
-                    if (newValue != oldValue) {
-                        this.updateSettingsValues({
-                            settings: {
-                                timeboxCount: newValue
+        });
+        return [{
+                xtype: 'combobox',
+                name: 'artifactType',
+                value: this.getSetting('artifactType'),
+                fieldLabel: 'Artifact type',
+                labelWidth: 150,
+                store: artifactTypeStore,
+                queryMode: 'local',
+                displayField: 'name',
+                valueField: 'value',
+                listeners: {
+                    scope: this,
+                    change: function(field, newValue, oldValue) {
+                        if (newValue != oldValue) {
+                            this.updateSettingsValues({
+                                settings: {
+                                    artifactType: newValue
+                                }
+                            });
+                            // Choice of artifact has changed
+                            this.setModelFieldsForType(newValue);
+                            // If Feature, also update timebox type to 'Release'
+                            if (this.isPiTypeSelected()) {
+                                timeboxTypeControl.setValue(Constants.TIMEBOX_TYPE_RELEASE);
+                                timeboxTypeControl.disable(); // User cannot pick other timeboxes for Features
                             }
-                        });
+                            else {
+                                timeboxTypeControl.enable();
+                            }
+                        }
+                    }
+                }
+            },
+            timeboxTypeControl,
+            {
+                xtype: 'rallynumberfield',
+                name: 'timeboxCount',
+                value: this.getSetting('timeboxCount'),
+                fieldLabel: "Timebox Count",
+                labelWidth: 150,
+                minValue: 1,
+                allowDecimals: false,
+                listeners: {
+                    scope: this,
+                    change: function(field, newValue, oldValue) {
+                        if (newValue != oldValue) {
+                            this.updateSettingsValues({
+                                settings: {
+                                    timeboxCount: newValue
+                                }
+                            });
+                        }
+                    }
+                }
+            }, {
+                xtype: 'rallynumberfield',
+                name: 'planningWindow',
+                value: this.getSetting('planningWindow'),
+                fieldLabel: 'Days after timebox start an item is considered "planned"',
+                labelWidth: 150,
+                minValue: 0,
+                allowDecimals: false,
+                listeners: {
+                    scope: this,
+                    change: function(field, newValue, oldValue) {
+                        if (newValue != oldValue) {
+                            this.updateSettingsValues({
+                                settings: {
+                                    planningWindow: newValue
+                                }
+                            });
+                        }
+                    }
+                }
+            }, {
+                xtype: 'rallycheckboxfield',
+                name: 'currentTimebox',
+                value: this.getSetting('currentTimebox'),
+                fieldLabel: 'Show current, in-progress timebox',
+                labelWidth: 150,
+                listeners: {
+                    scope: this,
+                    change: function(field, newValue, oldValue) {
+                        if (newValue != oldValue) {
+                            this.updateSettingsValues({
+                                settings: {
+                                    currentTimebox: newValue
+                                }
+                            });
+                        }
                     }
                 }
             }
-        }, {
-            xtype: 'rallynumberfield',
-            name: 'planningWindow',
-            value: this.getSetting('planningWindow'),
-            fieldLabel: 'Days after timebox start an item is considered "planned"',
-            labelWidth: 150,
-            minValue: 0,
-            allowDecimals: false,
-            listeners: {
-                scope: this,
-                change: function(field, newValue, oldValue) {
-                    if (newValue != oldValue) {
-                        this.updateSettingsValues({
-                            settings: {
-                                planningWindow: newValue
-                            }
-                        });
-                    }
-                }
-            }
-        }, {
-            xtype: 'rallycheckboxfield',
-            name: 'currentTimebox',
-            value: this.getSetting('currentTimebox'),
-            fieldLabel: 'Show current, in-progress timebox',
-            labelWidth: 150,
-            listeners: {
-                scope: this,
-                change: function(field, newValue, oldValue) {
-                    if (newValue != oldValue) {
-                        this.updateSettingsValues({
-                            settings: {
-                                currentTimebox: newValue
-                            }
-                        });
-                    }
-                }
-            }
-        }]
+        ]
     },
 
     viewChange: function() {
         this.setLoading(true);
-        this._buildChartConfig().then({
+        // Add the other filter, config and export controls
+        this.addControls().then({
+            scope: this,
+            success: this._buildChartConfig
+        }).then({
             scope: this,
             success: function(chartConfig) {
                 this._addGridboard(chartConfig);

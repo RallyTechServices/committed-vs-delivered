@@ -1,6 +1,6 @@
 Ext.define('Constants', {
     statics: {
-        CHART_TITLE: 'Stories Committed vs. Delivered',
+        CHART_TITLE: 'Committed vs. Delivered',
         PLANNED: 'Planned',
         UNPLANNED: 'Unplanned',
         COMMITTED: 'Comitted',
@@ -8,6 +8,10 @@ Ext.define('Constants', {
         IN_PROGRESS: ' (In-Progress)',
         Y_AXIS_TITLE: 'Count',
         APP_RESERVED_HEIGHT: 60,
+        ALWAYS_SELECTED_FIELDS: [
+            'FormattedID',
+            'Name'
+        ],
         DERIVED_FIELDS: [
             'timeboxName',
             'timeboxStartDate',
@@ -16,17 +20,24 @@ Ext.define('Constants', {
             'Planned',
             'Delivered'
         ],
-        DEFAULT_FIELDS: [
+        STORY_DEFAULT_FIELDS: [
             'FormattedID',
             'Name',
             'ScheduleState',
             'Iteration',
+            'Release',
             'AcceptedDate',
+        ],
+        PI_DEFAULT_FIELDS: [
+            'FormattedID',
+            'Name',
+            'State',
+            'Release',
+            'ActualEndDate',
         ],
         TIMEBOX_TYPE_ITERATION: 'Iteration',
         TIMEBOX_TYPE_RELEASE: 'Release',
         TIMEBOX_TYPE_ITERATION_LABEL: 'Iteration',
-        TIMEBOX_TYPE_RELEASE_LABEL: 'Release',
-        SNAPSHOT_LABEL: 'Snapshot'
+        TIMEBOX_TYPE_RELEASE_LABEL: 'Release'
     }
 });

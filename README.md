@@ -1,20 +1,21 @@
 # Committed vs Delivered
 
-For either `Iteration` or `Release` timeboxes...
+Show User Stories or Portfolio Items committed and delivered in a timebox.
 
-For each timebox in the current project show the number of stories where:
+For each timebox in the current project show the number of artifacts where:
 * timebox planning period - the timebox start date plus a configurable number of days (default 2)
-* committed - story was assigned to the timebox before the timebox end and remained assigned after the planning period end
-* delivered - committed story was accepted before timebox end
-* planned - committed story was assigned to the timebox before the planning period ended
-* unplanned - committed story was assigned to the timebox after the planning period ended
+* committed - artifact was assigned to the timebox before the timebox end and remained assigned after the planning period end
+* delivered - committed artifact was accepted (or actual end date) before timebox end
+* planned - committed artifact was assigned to the timebox before the planning period ended
+* unplanned - committed artifact was assigned to the timebox after the planning period ended
 
 Other features:
-* Advanced filter for stories
+* Advanced filter for artifact
 * Data export as CSV
 * Configurable data attributes for export, but always includes:
   * `FormattedID`
   * `Name`,
+  * `AcceptedDate` (or `ActualEndDate`)
   * `TimeboxName`
   * `TimeboxStartDate`
   * `TimeboxEndDate`
@@ -22,18 +23,19 @@ Other features:
   * `Planned`
   * `Delivered`
 * Configurable:
+  * By `User Story` or lowest level portfolio item (e.g. `Feature`)
   * By `Release` or `Iteration` timebox type
-  * Number of iterations to look back
-  * Days after iteration start that and item can be added to an iteration and still be considered "Planned"
-  * Show the current (in-progress) iteration.
+  * Number of timeboxes to look back
+  * Days after timebox start that and item can be added to an timebox and still be considered "Planned"
+  * Show the current (in-progress) timebox.
 
 ## Caveats
-* Stories are only shown in timeboxes that start *before* the story accepted date.
+* Artifacts are only shown in timeboxes that start *before* the artifact accepted date.
 Accepting a story today, means the work finished in today’s timebox. If the accepted story
 is then assigned to a timebox starting next week...the work didn’t move to next week,
 it still finished today. It isn't considered committed to that subsequent timebox because there
 is nothing left to accept.
-* The chart only shows stories that *currently* exist. Stories that have been deleted are
+* The chart only shows artifacts that *currently* exist. Artifacts that have been deleted are
 not shown.
 * Applied to current project or below.
 
