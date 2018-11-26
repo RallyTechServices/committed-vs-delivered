@@ -55,31 +55,7 @@ Ext.define("committed-vs-delivered", {
     },
 
     launch: function() {
-        // Add the ancestor filter plugin
-        var ancestorFilterPluginPromise = Ext.create('Deft.Deferred');
-        this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
-            ptype: 'UtilsAncestorPiAppFilter',
-            pluginId: 'ancestorFilterPlugin',
-            settingsConfig: {
-                labelWidth: 150,
-            },
-            listeners: {
-                scope: this,
-                ready: function(plugin) {
-                    ancestorFilterPluginPromise.resolve();
-                },
-            }
-        });
-        this.addPlugin(this.ancestorFilterPlugin);
-
-        // Once the ancestor filter plugin is ready, get the portfolio item types
-        // to be used in the inline filter
-        ancestorFilterPluginPromise.then({
-            scope: this,
-            success: function() {
-                return Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes()
-            }
-        }).then({
+        Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes().then({
             scope: this,
             success: function(portfolioItemTypes) {
                 this.portfolioItemTypes = _.sortBy(portfolioItemTypes, function(type) {
@@ -88,20 +64,11 @@ Ext.define("committed-vs-delivered", {
                 this.lowestPiType = this.portfolioItemTypes[0];
                 this.setModelFieldsForType(this.getSetting('artifactType'));
                 this.setTimeboxFieldsForType(this.getSetting('timeboxType'));
+                this.viewChange();
             },
             failure: function(msg) {
                 this._showError(msg);
             },
-        }).then({
-            scope: this,
-            // finally, setup listeners on the ancestor filter and kick off a view change
-            success: function() {
-                this.ancestorFilterPlugin.addListener({
-                    scope: this,
-                    select: this.viewChange
-                });
-                this.viewChange();
-            }
         })
     },
 
@@ -216,41 +183,6 @@ Ext.define("committed-vs-delivered", {
                             },
                             scope: this
                         }]
-                    });
-                    menu.showBy(button.getEl());
-                    if (button.toolTip) {
-                        button.toolTip.hide();
-                    }
-                },
-                scope: this
-            }
-        }, {
-            xtype: 'rallybutton',
-            id: 'config-button',
-            style: { 'float': 'right' },
-            cls: 'secondary rly-small',
-            iconCls: 'icon-cog',
-            frame: false,
-            itemId: 'tsconfig-menu-button',
-            listeners: {
-                click: function(button) {
-                    var menu = Ext.widget({
-                        xtype: 'rallypopover',
-                        floating: true,
-                        target: 'config-button',
-                        showChevron: false,
-                        items: [{
-                            xtype: 'container',
-                            cls: 'settings-popover',
-                            padding: '10',
-                            items: this.getConfigItems()
-                        }],
-                        title: 'Settings',
-                        listeners: {
-                            scope: this,
-                            // Must use destroy to catch all cases of dismissing the popover
-                            destroy: this.onSettingsClose
-                        }
                     });
                     menu.showBy(button.getEl());
                     if (button.toolTip) {
@@ -709,17 +641,8 @@ Ext.define("committed-vs-delivered", {
         if (timeboxScope && timeboxScope.isApplicable(this.modelName)) {
             filters.push(timeboxScope.getQueryFilter());
         }
-        var ancestorFilter = this.ancestorFilterPlugin.getFilterForType(this.modelName);
-        if (ancestorFilter) {
-            filters.push(ancestorFilter);
-        }
 
         var context = this.getContext();
-        var dataContext = context.getDataContext();
-        if (this.searchAllProjects()) {
-            dataContext.project = null;
-        }
-
         this.gridboard = gridArea.add({
             xtype: 'rallygridboard',
             context: context,
@@ -746,39 +669,17 @@ Ext.define("committed-vs-delivered", {
                 { name: Constants.TIMEBOX_TYPE_RELEASE_LABEL, value: Constants.TIMEBOX_TYPE_RELEASE },
             ]
         });
+        var typeStoreData = [
+            { name: 'User Story', value: 'HierarchicalRequirement' },
+        ];
+        // Called from getSettingsFields which is invoked before launch sets up the lowestPiType. Handle
+        // this case.
+        if (this.lowestPiType) {
+            typeStoreData.push({ name: this.lowestPiType.get('Name'), value: this.lowestPiType.get('TypePath') })
+        }
         var artifactTypeStore = Ext.create('Ext.data.Store', {
             fields: ['name', 'value'],
-            data: [
-                { name: 'User Story', value: 'HierarchicalRequirement' },
-                { name: this.lowestPiType.get('Name'), value: this.lowestPiType.get('TypePath') },
-            ]
-        });
-        var timeboxTypeControl = Ext.create('Ext.form.field.ComboBox', {
-            xtype: 'combobox',
-            name: 'timeboxType',
-            id: 'timeboxType',
-            value: this.getSetting('timeboxType'),
-            fieldLabel: 'Timebox type',
-            labelWidth: 150,
-            store: timeboxTypeStore,
-            queryMode: 'local',
-            displayField: 'name',
-            valueField: 'value',
-            disabled: this.isPiTypeSelected(),
-            listeners: {
-                scope: this,
-                change: function(field, newValue, oldValue) {
-                    if (newValue != oldValue) {
-                        this.updateSettingsValues({
-                            settings: {
-                                timeboxType: newValue
-                            }
-                        });
-                        // Choice of timebox has changed
-                        this.setTimeboxFieldsForType(newValue);
-                    }
-                }
-            }
+            data: typeStoreData
         });
         return [{
                 xtype: 'combobox',
@@ -802,6 +703,7 @@ Ext.define("committed-vs-delivered", {
                             // Choice of artifact has changed
                             this.setModelFieldsForType(newValue);
                             // If Feature, also update timebox type to 'Release'
+                            var timeboxTypeControl = Ext.ComponentManager.get('timeboxType');
                             if (this.isPiTypeSelected()) {
                                 timeboxTypeControl.setValue(Constants.TIMEBOX_TYPE_RELEASE);
                                 timeboxTypeControl.disable(); // User cannot pick other timeboxes for Features
@@ -813,7 +715,33 @@ Ext.define("committed-vs-delivered", {
                     }
                 }
             },
-            timeboxTypeControl,
+            {
+                xtype: 'combobox',
+                name: 'timeboxType',
+                id: 'timeboxType',
+                value: this.getSetting('timeboxType'),
+                fieldLabel: 'Timebox type',
+                labelWidth: 150,
+                store: timeboxTypeStore,
+                queryMode: 'local',
+                displayField: 'name',
+                valueField: 'value',
+                disabled: this.isPiTypeSelected(),
+                listeners: {
+                    scope: this,
+                    change: function(field, newValue, oldValue) {
+                        if (newValue != oldValue) {
+                            this.updateSettingsValues({
+                                settings: {
+                                    timeboxType: newValue
+                                }
+                            });
+                            // Choice of timebox has changed
+                            this.setTimeboxFieldsForType(newValue);
+                        }
+                    }
+                }
+            },
             {
                 xtype: 'rallynumberfield',
                 name: 'timeboxCount',
@@ -908,16 +836,7 @@ Ext.define("committed-vs-delivered", {
         return this.getContext().getScopedStateId(modelName + '-' + id);
     },
 
-    searchAllProjects: function() {
-        return this.ancestorFilterPlugin.getIgnoreProjectScope();
-    },
-
-    /*
-    disabled for now
     getSettingsFields: function() {
-        return [{
-            xtype: 'container'
-        }]
+        return this.getConfigItems();
     }
-    */
 });
