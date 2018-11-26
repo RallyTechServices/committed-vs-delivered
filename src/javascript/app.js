@@ -7,15 +7,6 @@ Ext.define("committed-vs-delivered", {
         align: 'stretch'
     },
     items: [{
-            id: Utils.AncestorPiAppFilter.RENDER_AREA_ID,
-            xtype: 'container',
-            layout: {
-                type: 'hbox',
-                align: 'middle',
-                defaultMargins: '0 10 10 0',
-            }
-        },
-        {
             xtype: 'container',
             itemId: 'controls-area',
             layout: 'hbox'
@@ -34,6 +25,7 @@ Ext.define("committed-vs-delivered", {
     ],
     config: {
         defaultSettings: {
+            showSettings: false,
             artifactType: 'HierarchicalRequirement',
             timeboxType: Constants.TIMEBOX_TYPE_ITERATION,
             timeboxCount: 5,
@@ -48,6 +40,7 @@ Ext.define("committed-vs-delivered", {
 
     currentData: [],
     settingsChanged: false,
+    userSettings: {},
 
     onTimeboxScopeChange: function(scope) {
         this.callParent(arguments);
@@ -55,54 +48,21 @@ Ext.define("committed-vs-delivered", {
     },
 
     launch: function() {
-        // Add the ancestor filter plugin
-        var ancestorFilterPluginPromise = Ext.create('Deft.Deferred');
-        this.ancestorFilterPlugin = Ext.create('Utils.AncestorPiAppFilter', {
-            ptype: 'UtilsAncestorPiAppFilter',
-            pluginId: 'ancestorFilterPlugin',
-            settingsConfig: {
-                labelWidth: 150,
-            },
-            listeners: {
-                scope: this,
-                ready: function(plugin) {
-                    ancestorFilterPluginPromise.resolve();
-                },
-            }
-        });
-        this.addPlugin(this.ancestorFilterPlugin);
-
-        // Once the ancestor filter plugin is ready, get the portfolio item types
-        // to be used in the inline filter
-        ancestorFilterPluginPromise.then({
-            scope: this,
-            success: function() {
-                return Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes()
-            }
-        }).then({
+        Rally.data.util.PortfolioItemHelper.getPortfolioItemTypes().then({
             scope: this,
             success: function(portfolioItemTypes) {
                 this.portfolioItemTypes = _.sortBy(portfolioItemTypes, function(type) {
                     return type.get('Ordinal');
                 });
                 this.lowestPiType = this.portfolioItemTypes[0];
-                this.setModelFieldsForType(this.getSetting('artifactType'));
-                this.setTimeboxFieldsForType(this.getSetting('timeboxType'));
+                this.setModelFieldsForType(this.getUserSetting('artifactType'));
+                this.setTimeboxFieldsForType(this.getUserSetting('timeboxType'));
+                this.viewChange();
             },
             failure: function(msg) {
                 this._showError(msg);
             },
-        }).then({
-            scope: this,
-            // finally, setup listeners on the ancestor filter and kick off a view change
-            success: function() {
-                this.ancestorFilterPlugin.addListener({
-                    scope: this,
-                    select: this.viewChange
-                });
-                this.viewChange();
-            }
-        })
+        });
     },
 
     setModelFieldsForType: function(artifactType) {
@@ -135,7 +95,7 @@ Ext.define("committed-vs-delivered", {
         var context = this.getContext();
         var controlsArea = this.down('#controls-area');
         controlsArea.removeAll();
-        controlsArea.add([{
+        var controls = [{
             xtype: 'rallyinlinefilterbutton',
             modelNames: [this.modelName],
             context: context,
@@ -224,42 +184,60 @@ Ext.define("committed-vs-delivered", {
                 },
                 scope: this
             }
-        }, {
-            xtype: 'rallybutton',
-            id: 'config-button',
-            style: { 'float': 'right' },
-            cls: 'secondary rly-small',
-            iconCls: 'icon-cog',
-            frame: false,
-            itemId: 'tsconfig-menu-button',
-            listeners: {
-                click: function(button) {
-                    var menu = Ext.widget({
-                        xtype: 'rallypopover',
-                        floating: true,
-                        target: 'config-button',
-                        showChevron: false,
-                        items: [{
-                            xtype: 'container',
-                            cls: 'settings-popover',
-                            padding: '10',
-                            items: this.getConfigItems()
-                        }],
-                        title: 'Settings',
-                        listeners: {
-                            scope: this,
-                            // Must use destroy to catch all cases of dismissing the popover
-                            destroy: this.onSettingsClose
-                        }
-                    });
-                    menu.showBy(button.getEl());
-                    if (button.toolTip) {
-                        button.toolTip.hide();
+        }];
+
+        if (this.getUserSetting('showSettings')) {
+            var configItems = this.getConfigItems();
+            configItems.push({
+                xtype: 'rallybutton',
+                text: 'Restore Defaults',
+                listeners: {
+                    scope: this,
+                    click: function() {
+                        this.userSettings = {};
+                        this.settingsChanged = true;
+                        this.onSettingsClose();
                     }
-                },
-                scope: this
-            }
-        }]);
+                }
+            });
+            controls.push({
+                xtype: 'rallybutton',
+                id: 'config-button',
+                style: { 'float': 'right' },
+                cls: 'secondary rly-small',
+                iconCls: 'icon-cog',
+                frame: false,
+                itemId: 'tsconfig-menu-button',
+                listeners: {
+                    click: function(button) {
+                        var menu = Ext.widget({
+                            xtype: 'rallypopover',
+                            floating: true,
+                            target: 'config-button',
+                            showChevron: false,
+                            items: [{
+                                xtype: 'container',
+                                cls: 'settings-popover',
+                                padding: '10',
+                                items: configItems
+                            }],
+                            title: 'Settings',
+                            listeners: {
+                                scope: this,
+                                // Must use destroy to catch all cases of dismissing the popover
+                                destroy: this.onSettingsClose
+                            }
+                        });
+                        menu.showBy(button.getEl());
+                        if (button.toolTip) {
+                            button.toolTip.hide();
+                        }
+                    },
+                    scope: this
+                }
+            });
+        }
+        controlsArea.add(controls);
 
         return filterDeferred.promise;
     },
@@ -344,7 +322,7 @@ Ext.define("committed-vs-delivered", {
             success: function(timeboxGroups) {
                 var promises = _.map(timeboxGroups, function(timeboxGroup) {
                     var timebox = timeboxGroup[0]; // Representative timebox for the group
-                    var planningWindowEndIso = Ext.Date.add(timebox.get(this.timeboxStartDateField), Ext.Date.DAY, this.getSetting('planningWindow')).toISOString();
+                    var planningWindowEndIso = Ext.Date.add(timebox.get(this.timeboxStartDateField), Ext.Date.DAY, this.getUserSetting('planningWindow')).toISOString();
                     var timeboxEndIso = timebox.get(this.timeboxEndDateField).toISOString();
                     var timeboxStartIso = timebox.get(this.timeboxStartDateField).toISOString();
                     var snapshotByOid = {}
@@ -456,7 +434,7 @@ Ext.define("committed-vs-delivered", {
 
             var timeboxName = datum.timebox.get('Name');
             // If this is the current in-progress timebox, annotate its name
-            if (this.getSetting('currentTimebox') && index == collection.length - 1) {
+            if (this.getUserSetting('currentTimebox') && index == collection.length - 1) {
                 if (datum.timebox.get(this.timeboxEndDateField) >= new Date()) {
                     timeboxName = timeboxName + Constants.IN_PROGRESS;
                 }
@@ -578,7 +556,7 @@ Ext.define("committed-vs-delivered", {
         // Get timeboxes by name from all child projects
 
         var timeboxFilterProperty = this.timeboxEndDateField;
-        if (this.getSetting('currentTimebox')) {
+        if (this.getUserSetting('currentTimebox')) {
             timeboxFilterProperty = this.timeboxStartDateField;
         }
         return Ext.create('Rally.data.wsapi.Store', {
@@ -597,7 +575,7 @@ Ext.define("committed-vs-delivered", {
                 operator: '<=',
                 value: 'today'
             }],
-            pageSize: this.getSetting('timeboxCount')
+            pageSize: this.getUserSetting('timeboxCount')
         }).load().then({
             scope: this,
             success: function(timeboxes) {
@@ -657,7 +635,7 @@ Ext.define("committed-vs-delivered", {
             return timebox.get('ObjectID');
         });
         var timeboxEndIso = timebox.get(this.timeboxEndDateField).toISOString();
-        var planningWindowEndIso = Ext.Date.add(timebox.get(this.timeboxStartDateField), Ext.Date.DAY, this.getSetting('planningWindow')).toISOString();
+        var planningWindowEndIso = Ext.Date.add(timebox.get(this.timeboxStartDateField), Ext.Date.DAY, this.getUserSetting('planningWindow')).toISOString();
         var dateFilter = Rally.data.lookback.QueryFilter.and([{
                 property: '_ValidFrom',
                 operator: '<=',
@@ -709,16 +687,9 @@ Ext.define("committed-vs-delivered", {
         if (timeboxScope && timeboxScope.isApplicable(this.modelName)) {
             filters.push(timeboxScope.getQueryFilter());
         }
-        var ancestorFilter = this.ancestorFilterPlugin.getFilterForType(this.modelName);
-        if (ancestorFilter) {
-            filters.push(ancestorFilter);
-        }
 
         var context = this.getContext();
         var dataContext = context.getDataContext();
-        if (this.searchAllProjects()) {
-            dataContext.project = null;
-        }
 
         this.gridboard = gridArea.add({
             xtype: 'rallygridboard',
@@ -738,7 +709,10 @@ Ext.define("committed-vs-delivered", {
         return this.modelName == this.lowestPiType.get('TypePath');
     },
 
-    getConfigItems: function() {
+    getConfigItems: function(showAppSettings) {
+        // If called in app settings context, show the app settings values and ignore any
+        // settings values the user may have overridden
+        var settingsFunc = showAppSettings ? this.getSetting.bind(this) : this.getUserSetting.bind(this);
         var timeboxTypeStore = Ext.create('Ext.data.Store', {
             fields: ['name', 'value'],
             data: [
@@ -746,18 +720,56 @@ Ext.define("committed-vs-delivered", {
                 { name: Constants.TIMEBOX_TYPE_RELEASE_LABEL, value: Constants.TIMEBOX_TYPE_RELEASE },
             ]
         });
+        var data = [
+            { name: 'User Story', value: 'HierarchicalRequirement' }
+        ];
+        // Called out of getSettingsFields which occurs before launch so we must be prepared
+        // to not have a pi type set.
+        if (this.lowestPiType) {
+            data.push({ name: this.lowestPiType.get('Name'), value: this.lowestPiType.get('TypePath') });
+        }
         var artifactTypeStore = Ext.create('Ext.data.Store', {
             fields: ['name', 'value'],
-            data: [
-                { name: 'User Story', value: 'HierarchicalRequirement' },
-                { name: this.lowestPiType.get('Name'), value: this.lowestPiType.get('TypePath') },
-            ]
+            data: data
         });
-        var timeboxTypeControl = Ext.create('Ext.form.field.ComboBox', {
+        return [{
+            xtype: 'combobox',
+            name: 'artifactType',
+            value: settingsFunc('artifactType'),
+            fieldLabel: 'Artifact type',
+            labelWidth: 150,
+            store: artifactTypeStore,
+            queryMode: 'local',
+            displayField: 'name',
+            valueField: 'value',
+            listeners: {
+                scope: this,
+                change: function(field, newValue, oldValue) {
+                    if (newValue != oldValue) {
+                        this.updateUserSettings({
+                            settings: {
+                                artifactType: newValue
+                            }
+                        });
+                        // Choice of artifact has changed
+                        this.setModelFieldsForType(newValue);
+                        // If Feature, also update timebox type to 'Release'
+                        var timeboxTypeControl = Ext.ComponentManager.get('timeboxType');
+                        if (this.isPiTypeSelected()) {
+                            timeboxTypeControl.setValue(Constants.TIMEBOX_TYPE_RELEASE);
+                            timeboxTypeControl.disable(); // User cannot pick other timeboxes for Features
+                        }
+                        else {
+                            timeboxTypeControl.enable();
+                        }
+                    }
+                }
+            }
+        }, {
             xtype: 'combobox',
             name: 'timeboxType',
             id: 'timeboxType',
-            value: this.getSetting('timeboxType'),
+            value: settingsFunc('timeboxType'),
             fieldLabel: 'Timebox type',
             labelWidth: 150,
             store: timeboxTypeStore,
@@ -769,7 +781,7 @@ Ext.define("committed-vs-delivered", {
                 scope: this,
                 change: function(field, newValue, oldValue) {
                     if (newValue != oldValue) {
-                        this.updateSettingsValues({
+                        this.updateUserSettings({
                             settings: {
                                 timeboxType: newValue
                             }
@@ -779,101 +791,65 @@ Ext.define("committed-vs-delivered", {
                     }
                 }
             }
-        });
-        return [{
-                xtype: 'combobox',
-                name: 'artifactType',
-                value: this.getSetting('artifactType'),
-                fieldLabel: 'Artifact type',
-                labelWidth: 150,
-                store: artifactTypeStore,
-                queryMode: 'local',
-                displayField: 'name',
-                valueField: 'value',
-                listeners: {
-                    scope: this,
-                    change: function(field, newValue, oldValue) {
-                        if (newValue != oldValue) {
-                            this.updateSettingsValues({
-                                settings: {
-                                    artifactType: newValue
-                                }
-                            });
-                            // Choice of artifact has changed
-                            this.setModelFieldsForType(newValue);
-                            // If Feature, also update timebox type to 'Release'
-                            if (this.isPiTypeSelected()) {
-                                timeboxTypeControl.setValue(Constants.TIMEBOX_TYPE_RELEASE);
-                                timeboxTypeControl.disable(); // User cannot pick other timeboxes for Features
+        }, {
+            xtype: 'rallynumberfield',
+            name: 'timeboxCount',
+            value: settingsFunc('timeboxCount'),
+            fieldLabel: "Timebox Count",
+            labelWidth: 150,
+            minValue: 1,
+            allowDecimals: false,
+            listeners: {
+                scope: this,
+                change: function(field, newValue, oldValue) {
+                    if (newValue != oldValue) {
+                        this.updateUserSettings({
+                            settings: {
+                                timeboxCount: newValue
                             }
-                            else {
-                                timeboxTypeControl.enable();
-                            }
-                        }
-                    }
-                }
-            },
-            timeboxTypeControl,
-            {
-                xtype: 'rallynumberfield',
-                name: 'timeboxCount',
-                value: this.getSetting('timeboxCount'),
-                fieldLabel: "Timebox Count",
-                labelWidth: 150,
-                minValue: 1,
-                allowDecimals: false,
-                listeners: {
-                    scope: this,
-                    change: function(field, newValue, oldValue) {
-                        if (newValue != oldValue) {
-                            this.updateSettingsValues({
-                                settings: {
-                                    timeboxCount: newValue
-                                }
-                            });
-                        }
-                    }
-                }
-            }, {
-                xtype: 'rallynumberfield',
-                name: 'planningWindow',
-                value: this.getSetting('planningWindow'),
-                fieldLabel: 'Days after timebox start an item is considered "planned"',
-                labelWidth: 150,
-                minValue: 0,
-                allowDecimals: false,
-                listeners: {
-                    scope: this,
-                    change: function(field, newValue, oldValue) {
-                        if (newValue != oldValue) {
-                            this.updateSettingsValues({
-                                settings: {
-                                    planningWindow: newValue
-                                }
-                            });
-                        }
-                    }
-                }
-            }, {
-                xtype: 'rallycheckboxfield',
-                name: 'currentTimebox',
-                value: this.getSetting('currentTimebox'),
-                fieldLabel: 'Show current, in-progress timebox',
-                labelWidth: 150,
-                listeners: {
-                    scope: this,
-                    change: function(field, newValue, oldValue) {
-                        if (newValue != oldValue) {
-                            this.updateSettingsValues({
-                                settings: {
-                                    currentTimebox: newValue
-                                }
-                            });
-                        }
+                        });
                     }
                 }
             }
-        ]
+        }, {
+            xtype: 'rallynumberfield',
+            name: 'planningWindow',
+            value: settingsFunc('planningWindow'),
+            fieldLabel: 'Days after timebox start an item is considered "planned"',
+            labelWidth: 150,
+            minValue: 0,
+            allowDecimals: false,
+            listeners: {
+                scope: this,
+                change: function(field, newValue, oldValue) {
+                    if (newValue != oldValue) {
+                        this.updateUserSettings({
+                            settings: {
+                                planningWindow: newValue
+                            }
+                        });
+                    }
+                }
+            }
+        }, {
+            xtype: 'rallycheckboxfield',
+            name: 'currentTimebox',
+            value: settingsFunc('currentTimebox'),
+            fieldLabel: 'Show current, in-progress timebox',
+            labelWidth: 150,
+            listeners: {
+                scope: this,
+                change: function(field, newValue, oldValue) {
+                    if (newValue != oldValue) {
+                        this.updateUserSettings({
+                            settings: {
+                                currentTimebox: newValue
+                            }
+                        });
+                    }
+                }
+            }
+        }]
     },
 
     viewChange: function() {
@@ -899,25 +875,36 @@ Ext.define("committed-vs-delivered", {
         }
     },
 
-    updateSettingsValues: function(options) {
+    updateUserSettings: function(options) {
         this.settingsChanged = true;
-        this.callParent(arguments);
+        _.merge(this.userSettings, options.settings);
     },
 
     getModelScopedStateId: function(modelName, id) {
         return this.getContext().getScopedStateId(modelName + '-' + id);
     },
 
-    searchAllProjects: function() {
-        return this.ancestorFilterPlugin.getIgnoreProjectScope();
-    },
-
-    /*
-    disabled for now
     getSettingsFields: function() {
         return [{
-            xtype: 'container'
-        }]
+            xtype: 'rallycheckboxfield',
+            name: 'showSettings',
+            value: this.getUserSetting('showSettings'),
+            fieldLabel: 'Show settings controls to user',
+            labelWidth: 150,
+        }].concat(this.getConfigItems(true));
+    },
+
+    /**
+     * Allow user settings to override the global app settings
+     */
+    getUserSetting: function(settingName) {
+        var result;
+        if (this.userSettings.hasOwnProperty(settingName)) {
+            result = this.userSettings[settingName];
+        }
+        else {
+            result = this.getSetting(settingName);
+        }
+        return result;
     }
-    */
 });
