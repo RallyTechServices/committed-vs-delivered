@@ -444,6 +444,19 @@ Ext.define("committed-vs-delivered", {
                 title: {
                     text: title + ' ' + Constants.CHART_TITLE + ' by ' + this.timeboxType
                 },
+                legend: {
+                    layout: 'vertical',
+                    labelFormatter: function() {
+                        var result = this.name;
+                        if (this.name == Constants.UNPLANNED) {
+                            var app = Rally.getApp();
+                            var timeboxType = app.getSetting('timeboxType');
+                            var days = app.getSetting('planningWindow');
+                            result = this.name + ' (' + Constants.UNPLANNED_DESCRIPTION.replace('{timebox}', timeboxType).replace('{days}', days) + ')'
+                        }
+                        return result;
+                    }
+                },
                 plotOptions: {
                     column: {
                         stacking: 'normal'
@@ -453,6 +466,9 @@ Ext.define("committed-vs-delivered", {
                         dataLabels: {
                             align: 'center',
                             verticalAlign: 'top',
+                        },
+                        events: {
+                            legendItemClick: function() { return false; } // Disable hiding some of data on legend click
                         }
                     }
                 },
@@ -766,7 +782,7 @@ Ext.define("committed-vs-delivered", {
                 xtype: 'rallynumberfield',
                 name: 'planningWindow',
                 value: this.getSetting('planningWindow'),
-                fieldLabel: 'Days after timebox start an item is considered "planned"',
+                fieldLabel: 'Timebox planning window (days)',
                 labelWidth: 150,
                 minValue: 0,
                 allowDecimals: false,
