@@ -313,7 +313,6 @@ Ext.define("committed-vs-delivered", {
                                 else {
                                     this.advancedFiltersString = '';
                                 }
-
                                 var artifactStore = Ext.create('Rally.data.wsapi.Store', {
                                     model: this.modelName,
                                     fetch: this.getFieldsFromButton(),
@@ -593,7 +592,6 @@ Ext.define("committed-vs-delivered", {
         }).then({
             scope: this,
             success: function(timeboxes) {
-console.log(timeboxes);
                 // Group by timebox name
                 return _.groupBy(timeboxes, function(timebox) {
                     return timebox.get('Name');
