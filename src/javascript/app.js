@@ -317,7 +317,7 @@ Ext.define("committed-vs-delivered", {
                                     model: this.modelName,
                                     fetch: this.getFieldsFromButton(),
                                     autoLoad: false,
-                                    pageSize: 10000,
+                                    pageSize: 20000,
                                     enablePostGet: true,
                                     filters: filters
                                 });
@@ -575,7 +575,7 @@ Ext.define("committed-vs-delivered", {
                     return Ext.create('Rally.data.wsapi.Store', {
                         model: this.timeboxType,
                         autoLoad: false,
-                        pageSize: 10000,
+                        pageSize: 20000,
                         fetch: ['ObjectID', this.timeboxStartDateField, this.timeboxEndDateField, 'Name'],
                         enablePostGet: true,
                         sorters: [{
