@@ -3,7 +3,7 @@ Ext.define('Constants', {
         CHART_TITLE: 'Committed vs. Delivered',
         PLANNED: 'Planned',
         UNPLANNED: 'Unplanned',
-        COMMITTED: 'Comitted',
+        COMMITTED: 'Committed',
         DELIVERED: 'Delivered',
         IN_PROGRESS: ' (In-Progress)',
         Y_AXIS_TITLE: 'Count',

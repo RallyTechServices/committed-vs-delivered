@@ -179,7 +179,7 @@ Ext.define("committed-vs-delivered", {
                             text: 'Export to CSV...',
                             handler: function() {
                                 var csvText = CArABU.technicalservices.FileUtilities.convertDataArrayToCSVText(this.currentData, this.getExportFieldsHash());
-                                CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'comitted.csv');
+                                CArABU.technicalservices.FileUtilities.saveCSVToFile(csvText, 'committed.csv');
                             },
                             scope: this
                         }]
@@ -313,11 +313,11 @@ Ext.define("committed-vs-delivered", {
                                 else {
                                     this.advancedFiltersString = '';
                                 }
-
                                 var artifactStore = Ext.create('Rally.data.wsapi.Store', {
                                     model: this.modelName,
                                     fetch: this.getFieldsFromButton(),
                                     autoLoad: false,
+                                    pageSize: 20000,
                                     enablePostGet: true,
                                     filters: filters
                                 });
@@ -377,7 +377,7 @@ Ext.define("committed-vs-delivered", {
         var timeboxNames = [];
         var plannedCommitted = [];
         var plannedDelivered = [];
-        var unplannedComitted = [];
+        var unplannedCommitted = [];
         var unplannedDelivered = [];
         this.currentData = [];
         _.each(sortedData, function(datum, index, collection) {
@@ -411,7 +411,7 @@ Ext.define("committed-vs-delivered", {
                             }
                         }
                         else {
-                            uc++; // Comitted and unplanned 
+                            uc++; // Committed and unplanned 
                             if (artifact.get('Delivered')) {
                                 ud++ // Unplanned and delivered
                             }
@@ -421,7 +421,7 @@ Ext.define("committed-vs-delivered", {
             }
             plannedCommitted.push(pc);
             plannedDelivered.push(pd);
-            unplannedComitted.push(uc);
+            unplannedCommitted.push(uc);
             unplannedDelivered.push(ud);
         }, this);
 
@@ -489,7 +489,7 @@ Ext.define("committed-vs-delivered", {
                         y: -20,
                         overflow: 'justify'
                     },
-                    data: unplannedComitted,
+                    data: unplannedCommitted,
                     stack: 0,
                     legendIndex: 2,
                     name: Constants.UNPLANNED
@@ -575,6 +575,7 @@ Ext.define("committed-vs-delivered", {
                     return Ext.create('Rally.data.wsapi.Store', {
                         model: this.timeboxType,
                         autoLoad: false,
+                        pageSize: 20000,
                         fetch: ['ObjectID', this.timeboxStartDateField, this.timeboxEndDateField, 'Name'],
                         enablePostGet: true,
                         sorters: [{
